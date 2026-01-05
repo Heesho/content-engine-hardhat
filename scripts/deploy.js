@@ -302,6 +302,7 @@ async function verifyContentByIndex(contentIndex) {
   const unitAddress = await content.unit();
   const quoteAddress = await content.quote();
   const treasury = await content.treasury();
+  const team = await content.team();
   const coreAddress = await content.core();
   const minInitPrice = await content.minInitPrice();
   const isModerated = await content.isModerated();
@@ -316,6 +317,7 @@ async function verifyContentByIndex(contentIndex) {
   console.log("  Unit:", unitAddress);
   console.log("  Quote:", quoteAddress);
   console.log("  Treasury:", treasury);
+  console.log("  Team:", team);
   console.log("  Core:", coreAddress);
   console.log("  Min Init Price:", minInitPrice.toString());
   console.log("  Is Moderated:", isModerated);
@@ -330,6 +332,7 @@ async function verifyContentByIndex(contentIndex) {
       unitAddress,
       quoteAddress,
       treasury,
+      team,
       coreAddress,
       rewarderFactory?.address || REWARDER_FACTORY,
       minInitPrice,
@@ -575,6 +578,8 @@ async function printContentInfo(contentIndex) {
   console.log("  Symbol:            ", await content.symbol());
   console.log("  Total Supply:      ", (await content.totalSupply()).toString());
   console.log("  Is Moderated:      ", await content.isModerated());
+  console.log("  Treasury:          ", await content.treasury());
+  console.log("  Team:              ", await content.team());
   console.log("Unit:                ", unitAddress);
   console.log("  Total Supply:      ", divDec(await unit.totalSupply()));
   console.log("Minter:              ", minterAddress);
