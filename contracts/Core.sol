@@ -5,26 +5,29 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {IRig} from "./interfaces/IRig.sol";
+import {IContent} from "./interfaces/IContent.sol";
+import {IMinter} from "./interfaces/IMinter.sol";
 import {IUnit} from "./interfaces/IUnit.sol";
 import {IUnitFactory} from "./interfaces/IUnitFactory.sol";
-import {IRigFactory} from "./interfaces/IRigFactory.sol";
+import {IContentFactory} from "./interfaces/IContentFactory.sol";
+import {IMinterFactory} from "./interfaces/IMinterFactory.sol";
 import {IAuctionFactory} from "./interfaces/IAuctionFactory.sol";
 import {IUniswapV2Factory, IUniswapV2Router} from "./interfaces/IUniswapV2.sol";
 
 /**
  * @title Core
  * @author heesho
- * @notice The main launchpad contract for deploying new Rig and Auction pairs.
- *         Users provide DONUT tokens to launch a new mining rig. The Core contract:
+ * @notice The main launchpad contract for deploying new Content Engine instances.
+ *         Users provide DONUT tokens to launch a new content platform. The Core contract:
  *         1. Deploys a new Unit token via UnitFactory
  *         2. Mints initial Unit tokens for liquidity
  *         3. Creates a Unit/DONUT liquidity pool on Uniswap V2
  *         4. Burns the initial LP tokens
  *         5. Deploys an Auction contract to collect and auction treasury fees
- *         6. Deploys a new Rig contract via RigFactory
- *         7. Transfers Unit minting rights to the Rig (permanently locked)
- *         8. Transfers ownership of the Rig to the launcher
+ *         6. Deploys a Content NFT collection via ContentFactory (creates Rewarder)
+ *         7. Deploys a Minter contract via MinterFactory
+ *         8. Transfers Unit minting rights to the Minter (permanently locked)
+ *         9. Transfers ownership of Content and Minter to the launcher
  */
 contract Core is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -35,44 +38,47 @@ contract Core is Ownable, ReentrancyGuard {
 
     /*----------  IMMUTABLES  -------------------------------------------*/
 
-    address public immutable weth; // WETH token (quote token for all rigs)
+    address public immutable weth; // WETH token (quote token)
     address public immutable donutToken; // token required to launch
     address public immutable uniswapV2Factory; // Uniswap V2 factory
     address public immutable uniswapV2Router; // Uniswap V2 router
     address public immutable unitFactory; // factory for deploying Unit tokens
-    address public immutable rigFactory; // factory for deploying Rigs
+    address public immutable contentFactory; // factory for deploying Content NFTs
+    address public immutable minterFactory; // factory for deploying Minters
     address public immutable auctionFactory; // factory for deploying Auctions
+    address public immutable rewarderFactory; // factory for deploying Rewarders
 
     /*----------  STATE  ------------------------------------------------*/
 
-    address public protocolFeeAddress; // receives protocol fees from rigs
+    address public protocolFeeAddress; // receives protocol fees from content collections
     uint256 public minDonutForLaunch; // minimum DONUT required to launch
 
-    address[] public deployedRigs; // array of all deployed rigs
-    mapping(address => bool) public isDeployedRig; // rig => is valid
-    mapping(address => address) public rigToLauncher; // rig => launcher address
-    mapping(address => address) public rigToUnit; // rig => Unit token
-    mapping(address => address) public rigToAuction; // rig => Auction contract
-    mapping(address => address) public rigToLP; // rig => LP token
+    address[] public deployedContents; // array of all deployed content contracts
+    mapping(address => bool) public isDeployedContent; // content => is valid
+    mapping(address => address) public contentToLauncher; // content => launcher address
+    mapping(address => address) public contentToUnit; // content => Unit token
+    mapping(address => address) public contentToAuction; // content => Auction contract
+    mapping(address => address) public contentToMinter; // content => Minter contract
+    mapping(address => address) public contentToRewarder; // content => Rewarder contract
+    mapping(address => address) public contentToLP; // content => LP token
 
     /*----------  STRUCTS  ----------------------------------------------*/
 
     /**
-     * @notice Parameters for launching a new Rig.
+     * @notice Parameters for launching a new Content Engine.
      */
     struct LaunchParams {
-        address launcher; // address to receive Rig ownership, team fees, and initial miner
+        address launcher; // address to receive ownership
         string tokenName; // Unit token name
         string tokenSymbol; // Unit token symbol
-        string uri; // metadata URI for the unit token
+        string uri; // metadata URI for the content
         uint256 donutAmount; // DONUT to provide for LP
         uint256 unitAmount; // Unit tokens minted for initial LP
         uint256 initialUps; // starting units per second
         uint256 tailUps; // minimum units per second
         uint256 halvingPeriod; // time between halvings
-        uint256 rigEpochPeriod; // rig auction epoch duration
-        uint256 rigPriceMultiplier; // rig price multiplier
-        uint256 rigMinInitPrice; // rig minimum starting price
+        uint256 contentMinInitPrice; // content minimum starting price
+        bool contentIsModerated; // whether content requires approval
         uint256 auctionInitPrice; // auction starting price
         uint256 auctionEpochPeriod; // auction epoch duration
         uint256 auctionPriceMultiplier; // auction price multiplier
@@ -91,9 +97,11 @@ contract Core is Ownable, ReentrancyGuard {
     /*----------  EVENTS  -----------------------------------------------*/
 
     event Core__Launched(
-        address launcher,
-        address unit,
-        address rig,
+        address indexed launcher,
+        address indexed content,
+        address indexed unit,
+        address minter,
+        address rewarder,
         address auction,
         address lpToken,
         string tokenName,
@@ -104,9 +112,8 @@ contract Core is Ownable, ReentrancyGuard {
         uint256 initialUps,
         uint256 tailUps,
         uint256 halvingPeriod,
-        uint256 rigEpochPeriod,
-        uint256 rigPriceMultiplier,
-        uint256 rigMinInitPrice,
+        uint256 contentMinInitPrice,
+        bool contentIsModerated,
         uint256 auctionInitPrice,
         uint256 auctionEpochPeriod,
         uint256 auctionPriceMultiplier,
@@ -119,13 +126,15 @@ contract Core is Ownable, ReentrancyGuard {
 
     /**
      * @notice Deploy the Core launchpad contract.
-     * @param _weth WETH token address (quote token for all rigs)
+     * @param _weth WETH token address (quote token)
      * @param _donutToken DONUT token address
      * @param _uniswapV2Factory Uniswap V2 factory address
      * @param _uniswapV2Router Uniswap V2 router address
      * @param _unitFactory UnitFactory contract address
-     * @param _rigFactory RigFactory contract address
+     * @param _contentFactory ContentFactory contract address
+     * @param _minterFactory MinterFactory contract address
      * @param _auctionFactory AuctionFactory contract address
+     * @param _rewarderFactory RewarderFactory contract address
      * @param _protocolFeeAddress Address to receive protocol fees
      * @param _minDonutForLaunch Minimum DONUT required to launch
      */
@@ -135,15 +144,17 @@ contract Core is Ownable, ReentrancyGuard {
         address _uniswapV2Factory,
         address _uniswapV2Router,
         address _unitFactory,
-        address _rigFactory,
+        address _contentFactory,
+        address _minterFactory,
         address _auctionFactory,
+        address _rewarderFactory,
         address _protocolFeeAddress,
         uint256 _minDonutForLaunch
     ) {
         if (
             _weth == address(0) || _donutToken == address(0) || _uniswapV2Factory == address(0)
-                || _uniswapV2Router == address(0) || _unitFactory == address(0) || _rigFactory == address(0)
-                || _auctionFactory == address(0)
+                || _uniswapV2Router == address(0) || _unitFactory == address(0) || _contentFactory == address(0)
+                || _minterFactory == address(0) || _auctionFactory == address(0) || _rewarderFactory == address(0)
         ) {
             revert Core__ZeroAddress();
         }
@@ -153,8 +164,10 @@ contract Core is Ownable, ReentrancyGuard {
         uniswapV2Factory = _uniswapV2Factory;
         uniswapV2Router = _uniswapV2Router;
         unitFactory = _unitFactory;
-        rigFactory = _rigFactory;
+        contentFactory = _contentFactory;
+        minterFactory = _minterFactory;
         auctionFactory = _auctionFactory;
+        rewarderFactory = _rewarderFactory;
         protocolFeeAddress = _protocolFeeAddress;
         minDonutForLaunch = _minDonutForLaunch;
     }
@@ -162,18 +175,27 @@ contract Core is Ownable, ReentrancyGuard {
     /*----------  EXTERNAL FUNCTIONS  -----------------------------------*/
 
     /**
-     * @notice Launch a new Rig with associated Unit token, LP, and Auction.
+     * @notice Launch a new Content Engine with associated Unit token, LP, Content, Minter, and Auction.
      * @dev Caller must approve DONUT tokens before calling.
      * @param params Launch parameters struct
      * @return unit Address of deployed Unit token
-     * @return rig Address of deployed Rig contract
+     * @return content Address of deployed Content NFT contract
+     * @return minter Address of deployed Minter contract
+     * @return rewarder Address of deployed Rewarder contract
      * @return auction Address of deployed Auction contract
      * @return lpToken Address of Unit/DONUT LP token
      */
     function launch(LaunchParams calldata params)
         external
         nonReentrant
-        returns (address unit, address rig, address auction, address lpToken)
+        returns (
+            address unit,
+            address content,
+            address minter,
+            address rewarder,
+            address auction,
+            address lpToken
+        )
     {
         // Validate inputs
         if (params.launcher == address(0)) revert Core__InvalidLauncher();
@@ -185,7 +207,7 @@ contract Core is Ownable, ReentrancyGuard {
         // Transfer DONUT from launcher
         IERC20(donutToken).safeTransferFrom(msg.sender, address(this), params.donutAmount);
 
-        // Deploy Unit token via factory (Core becomes initial rig/minter)
+        // Deploy Unit token via factory (Core becomes initial minter)
         unit = IUnitFactory(unitFactory).deploy(params.tokenName, params.tokenSymbol);
 
         // Mint initial Unit tokens for LP seeding
@@ -212,7 +234,7 @@ contract Core is Ownable, ReentrancyGuard {
         lpToken = IUniswapV2Factory(uniswapV2Factory).getPair(unit, donutToken);
         IERC20(lpToken).safeTransfer(DEAD_ADDRESS, liquidity);
 
-        // Deploy Auction with LP as payment token
+        // Deploy Auction with LP as payment token (receives treasury fees, burns LP)
         auction = IAuctionFactory(auctionFactory).deploy(
             params.auctionInitPrice,
             lpToken,
@@ -222,40 +244,54 @@ contract Core is Ownable, ReentrancyGuard {
             params.auctionMinInitPrice
         );
 
-        // Deploy Rig via factory
-        rig = IRigFactory(rigFactory).deploy(
+        // Deploy Content via factory (creates Rewarder internally)
+        content = IContentFactory(contentFactory).deploy(
+            params.tokenName,
+            params.tokenSymbol,
+            params.uri,
             unit,
             weth,
             auction,
-            params.launcher,
             address(this),
-            params.uri,
-            params.initialUps,
-            params.tailUps,
-            params.halvingPeriod,
-            params.rigEpochPeriod,
-            params.rigPriceMultiplier,
-            params.rigMinInitPrice
+            rewarderFactory,
+            params.contentMinInitPrice,
+            params.contentIsModerated
         );
 
-        // Transfer Unit minting rights to Rig (permanently locked since Rig has no setRig function)
-        IUnit(unit).setRig(rig);
+        // Get Rewarder address from Content
+        rewarder = IContent(content).rewarder();
 
-        // Transfer Rig ownership to launcher
-        IRig(rig).transferOwnership(params.launcher);
+        // Deploy Minter via factory
+        minter = IMinterFactory(minterFactory).deploy(
+            unit,
+            rewarder,
+            params.initialUps,
+            params.tailUps,
+            params.halvingPeriod
+        );
+
+        // Transfer Unit minting rights to Minter (permanently locked since Minter has no setMinter function)
+        IUnit(unit).setMinter(minter);
+
+        // Transfer Content ownership to launcher
+        IContent(content).transferOwnership(params.launcher);
 
         // Update registry
-        deployedRigs.push(rig);
-        isDeployedRig[rig] = true;
-        rigToLauncher[rig] = params.launcher;
-        rigToUnit[rig] = unit;
-        rigToAuction[rig] = auction;
-        rigToLP[rig] = lpToken;
+        deployedContents.push(content);
+        isDeployedContent[content] = true;
+        contentToLauncher[content] = params.launcher;
+        contentToUnit[content] = unit;
+        contentToAuction[content] = auction;
+        contentToMinter[content] = minter;
+        contentToRewarder[content] = rewarder;
+        contentToLP[content] = lpToken;
 
         emit Core__Launched(
             params.launcher,
+            content,
             unit,
-            rig,
+            minter,
+            rewarder,
             auction,
             lpToken,
             params.tokenName,
@@ -266,16 +302,15 @@ contract Core is Ownable, ReentrancyGuard {
             params.initialUps,
             params.tailUps,
             params.halvingPeriod,
-            params.rigEpochPeriod,
-            params.rigPriceMultiplier,
-            params.rigMinInitPrice,
+            params.contentMinInitPrice,
+            params.contentIsModerated,
             params.auctionInitPrice,
             params.auctionEpochPeriod,
             params.auctionPriceMultiplier,
             params.auctionMinInitPrice
         );
 
-        return (unit, rig, auction, lpToken);
+        return (unit, content, minter, rewarder, auction, lpToken);
     }
 
     /*----------  RESTRICTED FUNCTIONS  ---------------------------------*/
@@ -302,10 +337,10 @@ contract Core is Ownable, ReentrancyGuard {
     /*----------  VIEW FUNCTIONS  ---------------------------------------*/
 
     /**
-     * @notice Get the total number of deployed rigs.
-     * @return Number of rigs launched
+     * @notice Get the total number of deployed content contracts.
+     * @return Number of content contracts launched
      */
-    function deployedRigsLength() external view returns (uint256) {
-        return deployedRigs.length;
+    function deployedContentsLength() external view returns (uint256) {
+        return deployedContents.length;
     }
 }

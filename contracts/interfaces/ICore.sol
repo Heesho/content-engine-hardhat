@@ -17,9 +17,8 @@ interface ICore {
         uint256 initialUps;
         uint256 tailUps;
         uint256 halvingPeriod;
-        uint256 rigEpochPeriod;
-        uint256 rigPriceMultiplier;
-        uint256 rigMinInitPrice;
+        uint256 contentMinInitPrice;
+        bool contentIsModerated;
         uint256 auctionInitPrice;
         uint256 auctionEpochPeriod;
         uint256 auctionPriceMultiplier;
@@ -28,18 +27,27 @@ interface ICore {
 
     function launch(LaunchParams calldata params)
         external
-        returns (address unit, address rig, address auction, address lpToken);
+        returns (
+            address unit,
+            address content,
+            address minter,
+            address rewarder,
+            address auction,
+            address lpToken
+        );
     function protocolFeeAddress() external view returns (address);
     function weth() external view returns (address);
     function donutToken() external view returns (address);
     function uniswapV2Factory() external view returns (address);
     function uniswapV2Router() external view returns (address);
     function minDonutForLaunch() external view returns (uint256);
-    function isDeployedRig(address rig) external view returns (bool);
-    function rigToLauncher(address rig) external view returns (address);
-    function rigToUnit(address rig) external view returns (address);
-    function rigToAuction(address rig) external view returns (address);
-    function rigToLP(address rig) external view returns (address);
-    function deployedRigsLength() external view returns (uint256);
-    function deployedRigs(uint256 index) external view returns (address);
+    function isDeployedContent(address content) external view returns (bool);
+    function contentToLauncher(address content) external view returns (address);
+    function contentToUnit(address content) external view returns (address);
+    function contentToAuction(address content) external view returns (address);
+    function contentToMinter(address content) external view returns (address);
+    function contentToRewarder(address content) external view returns (address);
+    function contentToLP(address content) external view returns (address);
+    function deployedContentsLength() external view returns (uint256);
+    function deployedContents(uint256 index) external view returns (address);
 }

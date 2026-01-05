@@ -8,52 +8,52 @@ import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Vo
 /**
  * @title Unit
  * @author heesho
- * @notice ERC20 token with permit and voting capabilities, minted by a Rig contract.
- * @dev Only the rig address can mint new tokens. Includes governance voting functionality.
- *      The rig address can be transferred once by calling setRig(). Once transferred to a
- *      Rig contract (which has no setRig function), the rig address becomes effectively immutable.
+ * @notice ERC20 token with permit and voting capabilities, minted by a Minter contract.
+ * @dev Only the minter address can mint new tokens. Includes governance voting functionality.
+ *      The minter address can be transferred once by calling setMinter(). Once transferred to a
+ *      Minter contract (which has no setMinter function), the minter address becomes effectively immutable.
  */
 contract Unit is ERC20, ERC20Permit, ERC20Votes {
-    address public rig;
+    address public minter;
 
-    error Unit__NotRig();
-    error Unit__InvalidRig();
+    error Unit__NotMinter();
+    error Unit__InvalidMinter();
 
     event Unit__Minted(address account, uint256 amount);
     event Unit__Burned(address account, uint256 amount);
-    event Unit__RigSet(address indexed rig);
+    event Unit__MinterSet(address indexed minter);
 
     /**
      * @notice Deploy a new Unit token.
-     * @dev The deployer (msg.sender) becomes the initial rig for minting.
+     * @dev The deployer (msg.sender) becomes the initial minter.
      * @param _name Token name
      * @param _symbol Token symbol
      */
     constructor(string memory _name, string memory _symbol) ERC20(_name, _symbol) ERC20Permit(_name) {
-        rig = msg.sender;
+        minter = msg.sender;
     }
 
     /**
-     * @notice Transfer minting rights to a new rig address.
-     * @dev Only callable by the current rig. Once set to a Rig contract (which has no
-     *      setRig function), this becomes permanently locked.
-     * @param _rig New rig address
+     * @notice Transfer minting rights to a new minter address.
+     * @dev Only callable by the current minter. Once set to a Minter contract (which has no
+     *      setMinter function), this becomes permanently locked.
+     * @param _minter New minter address
      */
-    function setRig(address _rig) external {
-        if (msg.sender != rig) revert Unit__NotRig();
-        if (_rig == address(0)) revert Unit__InvalidRig();
-        rig = _rig;
-        emit Unit__RigSet(_rig);
+    function setMinter(address _minter) external {
+        if (msg.sender != minter) revert Unit__NotMinter();
+        if (_minter == address(0)) revert Unit__InvalidMinter();
+        minter = _minter;
+        emit Unit__MinterSet(_minter);
     }
 
     /**
      * @notice Mint new tokens to an account.
-     * @dev Only callable by the rig address.
+     * @dev Only callable by the minter address.
      * @param account Recipient address
      * @param amount Amount to mint
      */
     function mint(address account, uint256 amount) external {
-        if (msg.sender != rig) revert Unit__NotRig();
+        if (msg.sender != minter) revert Unit__NotMinter();
         _mint(account, amount);
         emit Unit__Minted(account, amount);
     }

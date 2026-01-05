@@ -7,9 +7,9 @@ require("solidity-coverage");
 const CHAIN_ID = 8453; // base chain id
 
 config();
-const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
+const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000001";
 const SCAN_API_KEY = process.env.SCAN_API_KEY || "";
-const RPC_URL = process.env.RPC_URL || "";
+const RPC_URL = process.env.RPC_URL || "https://mainnet.base.org";
 
 module.exports = {
   solidity: {
@@ -28,7 +28,14 @@ module.exports = {
       chainId: CHAIN_ID,
       accounts: [PRIVATE_KEY],
     },
-    hardhat: {},
+    hardhat: {
+      accounts: {
+        count: 20,
+        accountsBalance: "100000000000000000000000", // 100000 ETH per account
+      },
+      gas: 30000000,
+      blockGasLimit: 30000000,
+    },
   },
   etherscan: {
     apiKey: {

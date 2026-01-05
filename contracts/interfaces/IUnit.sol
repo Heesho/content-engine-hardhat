@@ -8,5 +8,6 @@ pragma solidity 0.8.19;
  */
 interface IUnit {
     function mint(address to, uint256 amount) external;
-    function setRig(address _rig) external;
+    function setMinter(address _minter) external;
+    function minter() external view returns (address);
 }

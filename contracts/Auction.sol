@@ -61,6 +61,7 @@ contract Auction is ReentrancyGuard {
     /*----------  EVENTS  -----------------------------------------------*/
 
     event Auction__Buy(address indexed buyer, address indexed assetsReceiver, uint256 paymentAmount);
+    event Auction__EpochStarted(uint256 indexed epochId, uint256 initPrice, uint256 startTime);
 
     /*----------  CONSTRUCTOR  ------------------------------------------*/
 
@@ -155,6 +156,7 @@ contract Auction is ReentrancyGuard {
         startTime = block.timestamp;
 
         emit Auction__Buy(msg.sender, assetsReceiver, paymentAmount);
+        emit Auction__EpochStarted(epochId, newInitPrice, block.timestamp);
 
         return paymentAmount;
     }

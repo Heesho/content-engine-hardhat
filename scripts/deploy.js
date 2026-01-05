@@ -22,14 +22,16 @@ const MULTISIG_ADDRESS = "0xeE0CB49D2805DA6bC0A979ddAd87bb793fbB765E";
 const MIN_DONUT_FOR_LAUNCH = convert("1000", 18); // 1000 DONUT minimum
 
 // Deployed Contract Addresses (paste after deployment)
-const UNIT_FACTORY = "0xBe569151312c41d1927322705EB96933fe4911A5";
-const RIG_FACTORY = "0x74748d7BeEDC9Cb503294ce97C85ae6Dc9Bd2bD6";
-const AUCTION_FACTORY = "0x856c88cDD4fFd6E922b9C9A468504A738026418d";
-const CORE = "0xA35588D152F45C95f5b152e099647f081BD9F5AB";
-const MULTICALL = "0x5D16A5EB8Ac507eF417A44b8d767104dC52EFa87";
+const UNIT_FACTORY = "";
+const CONTENT_FACTORY = "";
+const MINTER_FACTORY = "";
+const REWARDER_FACTORY = "";
+const AUCTION_FACTORY = "";
+const CORE = "";
+const MULTICALL = "";
 
 // Contract Variables
-let unitFactory, rigFactory, auctionFactory, core, multicall;
+let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory, core, multicall;
 
 // =============================================================================
 // GET CONTRACTS
@@ -43,10 +45,24 @@ async function getContracts() {
     );
   }
 
-  if (RIG_FACTORY) {
-    rigFactory = await ethers.getContractAt(
-      "contracts/RigFactory.sol:RigFactory",
-      RIG_FACTORY
+  if (CONTENT_FACTORY) {
+    contentFactory = await ethers.getContractAt(
+      "contracts/ContentFactory.sol:ContentFactory",
+      CONTENT_FACTORY
+    );
+  }
+
+  if (MINTER_FACTORY) {
+    minterFactory = await ethers.getContractAt(
+      "contracts/MinterFactory.sol:MinterFactory",
+      MINTER_FACTORY
+    );
+  }
+
+  if (REWARDER_FACTORY) {
+    rewarderFactory = await ethers.getContractAt(
+      "contracts/RewarderFactory.sol:RewarderFactory",
+      REWARDER_FACTORY
     );
   }
 
@@ -84,13 +100,31 @@ async function deployUnitFactory() {
   console.log("UnitFactory Deployed at:", unitFactory.address);
 }
 
-async function deployRigFactory() {
-  console.log("Starting RigFactory Deployment");
-  const artifact = await ethers.getContractFactory("RigFactory");
+async function deployContentFactory() {
+  console.log("Starting ContentFactory Deployment");
+  const artifact = await ethers.getContractFactory("ContentFactory");
   const contract = await artifact.deploy({ gasPrice: ethers.gasPrice });
-  rigFactory = await contract.deployed();
+  contentFactory = await contract.deployed();
   await sleep(5000);
-  console.log("RigFactory Deployed at:", rigFactory.address);
+  console.log("ContentFactory Deployed at:", contentFactory.address);
+}
+
+async function deployMinterFactory() {
+  console.log("Starting MinterFactory Deployment");
+  const artifact = await ethers.getContractFactory("MinterFactory");
+  const contract = await artifact.deploy({ gasPrice: ethers.gasPrice });
+  minterFactory = await contract.deployed();
+  await sleep(5000);
+  console.log("MinterFactory Deployed at:", minterFactory.address);
+}
+
+async function deployRewarderFactory() {
+  console.log("Starting RewarderFactory Deployment");
+  const artifact = await ethers.getContractFactory("RewarderFactory");
+  const contract = await artifact.deploy({ gasPrice: ethers.gasPrice });
+  rewarderFactory = await contract.deployed();
+  await sleep(5000);
+  console.log("RewarderFactory Deployed at:", rewarderFactory.address);
 }
 
 async function deployAuctionFactory() {
@@ -119,8 +153,10 @@ async function deployCore() {
     UNISWAP_V2_FACTORY,
     UNISWAP_V2_ROUTER,
     unitFactory.address,
-    rigFactory.address,
+    contentFactory.address,
+    minterFactory.address,
     auctionFactory.address,
+    rewarderFactory.address,
     PROTOCOL_FEE_ADDRESS,
     MIN_DONUT_FOR_LAUNCH,
     { gasPrice: ethers.gasPrice }
@@ -160,14 +196,34 @@ async function verifyUnitFactory() {
   console.log("UnitFactory Verified");
 }
 
-async function verifyRigFactory() {
-  console.log("Starting RigFactory Verification");
+async function verifyContentFactory() {
+  console.log("Starting ContentFactory Verification");
   await hre.run("verify:verify", {
-    address: rigFactory?.address || RIG_FACTORY,
-    contract: "contracts/RigFactory.sol:RigFactory",
+    address: contentFactory?.address || CONTENT_FACTORY,
+    contract: "contracts/ContentFactory.sol:ContentFactory",
     constructorArguments: [],
   });
-  console.log("RigFactory Verified");
+  console.log("ContentFactory Verified");
+}
+
+async function verifyMinterFactory() {
+  console.log("Starting MinterFactory Verification");
+  await hre.run("verify:verify", {
+    address: minterFactory?.address || MINTER_FACTORY,
+    contract: "contracts/MinterFactory.sol:MinterFactory",
+    constructorArguments: [],
+  });
+  console.log("MinterFactory Verified");
+}
+
+async function verifyRewarderFactory() {
+  console.log("Starting RewarderFactory Verification");
+  await hre.run("verify:verify", {
+    address: rewarderFactory?.address || REWARDER_FACTORY,
+    contract: "contracts/RewarderFactory.sol:RewarderFactory",
+    constructorArguments: [],
+  });
+  console.log("RewarderFactory Verified");
 }
 
 async function verifyAuctionFactory() {
@@ -191,8 +247,10 @@ async function verifyCore() {
       UNISWAP_V2_FACTORY,
       UNISWAP_V2_ROUTER,
       unitFactory?.address || UNIT_FACTORY,
-      rigFactory?.address || RIG_FACTORY,
+      contentFactory?.address || CONTENT_FACTORY,
+      minterFactory?.address || MINTER_FACTORY,
       auctionFactory?.address || AUCTION_FACTORY,
+      rewarderFactory?.address || REWARDER_FACTORY,
       PROTOCOL_FEE_ADDRESS,
       MIN_DONUT_FOR_LAUNCH,
     ],
@@ -210,9 +268,9 @@ async function verifyMulticall() {
   console.log("Multicall Verified");
 }
 
-async function verifyUnitByRigIndex(rigIndex) {
-  const rigAddress = await core.deployedRigs(rigIndex);
-  const unitAddress = await core.rigToUnit(rigAddress);
+async function verifyUnitByContentIndex(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const unitAddress = await core.contentToUnit(contentAddress);
   const unit = await ethers.getContractAt(
     "contracts/Unit.sol:Unit",
     unitAddress
@@ -233,90 +291,111 @@ async function verifyUnitByRigIndex(rigIndex) {
   console.log("Unit Verified:", unitAddress);
 }
 
-async function getUnitVerificationInfo(rigIndex) {
-  const rigAddress = await core.deployedRigs(rigIndex);
-  const unitAddress = await core.rigToUnit(rigAddress);
-  const unit = await ethers.getContractAt(
-    "contracts/Unit.sol:Unit",
-    unitAddress
+async function verifyContentByIndex(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const content = await ethers.getContractAt(
+    "contracts/Content.sol:Content",
+    contentAddress
   );
 
-  const name = await unit.name();
-  const symbol = await unit.symbol();
+  // Read constructor args from the deployed contract
+  const unitAddress = await content.unit();
+  const quoteAddress = await content.quote();
+  const treasury = await content.treasury();
+  const coreAddress = await content.core();
+  const minInitPrice = await content.minInitPrice();
+  const isModerated = await content.isModerated();
+  const uri = await content.uri();
+  const name = await content.name();
+  const symbol = await content.symbol();
 
-  // ABI encode the constructor arguments
-  const abiCoder = new ethers.utils.AbiCoder();
-  const encodedArgs = abiCoder.encode(["string", "string"], [name, symbol]);
-  // Remove '0x' prefix for BaseScan
-  const encodedArgsNoPrefix = encodedArgs.slice(2);
-
-  console.log("\n=== Unit Verification Info ===\n");
-  console.log("Unit Address:", unitAddress);
-  console.log("Name:", name);
-  console.log("Symbol:", symbol);
-  console.log("\nABI-Encoded Constructor Arguments (for BaseScan):");
-  console.log(encodedArgsNoPrefix);
-  console.log("\n==============================\n");
-
-  return { unitAddress, name, symbol, encodedArgs: encodedArgsNoPrefix };
-}
-
-async function verifyRigByIndex(rigIndex) {
-  const rigAddress = await core.deployedRigs(rigIndex);
-  const rig = await ethers.getContractAt("contracts/Rig.sol:Rig", rigAddress);
-
-  // Read all constructor args from the deployed contract
-  const unitAddress = await rig.unit();
-  const quoteAddress = await rig.quote();
-  const treasury = await rig.treasury();
-  const team = await rig.team();
-  const coreAddress = await rig.core();
-  const uri = await rig.uri();
-  const initialUps = await rig.initialUps();
-  const tailUps = await rig.tailUps();
-  const halvingPeriod = await rig.halvingPeriod();
-  const epochPeriod = await rig.epochPeriod();
-  const priceMultiplier = await rig.priceMultiplier();
-  const minInitPrice = await rig.minInitPrice();
-
-  console.log("Starting Rig Verification for:", rigAddress);
+  console.log("Starting Content Verification for:", contentAddress);
+  console.log("  Name:", name);
+  console.log("  Symbol:", symbol);
+  console.log("  URI:", uri);
   console.log("  Unit:", unitAddress);
   console.log("  Quote:", quoteAddress);
   console.log("  Treasury:", treasury);
-  console.log("  Team:", team);
   console.log("  Core:", coreAddress);
-  console.log("  URI:", uri);
-  console.log("  Initial UPS:", initialUps.toString());
-  console.log("  Tail UPS:", tailUps.toString());
-  console.log("  Halving Period:", halvingPeriod.toString());
-  console.log("  Epoch Period:", epochPeriod.toString());
-  console.log("  Price Multiplier:", priceMultiplier.toString());
   console.log("  Min Init Price:", minInitPrice.toString());
+  console.log("  Is Moderated:", isModerated);
 
   await hre.run("verify:verify", {
-    address: rigAddress,
-    contract: "contracts/Rig.sol:Rig",
+    address: contentAddress,
+    contract: "contracts/Content.sol:Content",
     constructorArguments: [
+      name,
+      symbol,
+      uri,
       unitAddress,
       quoteAddress,
       treasury,
-      team,
       coreAddress,
-      uri,
+      rewarderFactory?.address || REWARDER_FACTORY,
+      minInitPrice,
+      isModerated,
+    ],
+  });
+  console.log("Content Verified:", contentAddress);
+}
+
+async function verifyMinterByContentIndex(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const minterAddress = await core.contentToMinter(contentAddress);
+  const minter = await ethers.getContractAt(
+    "contracts/Minter.sol:Minter",
+    minterAddress
+  );
+
+  // Read constructor args
+  const unitAddress = await minter.unit();
+  const rewarderAddress = await minter.rewarder();
+  const team = await minter.team();
+  const initialUps = await minter.initialUps();
+  const tailUps = await minter.tailUps();
+  const halvingPeriod = await minter.halvingPeriod();
+
+  console.log("Starting Minter Verification for:", minterAddress);
+  console.log("  Unit:", unitAddress);
+  console.log("  Rewarder:", rewarderAddress);
+  console.log("  Team:", team);
+  console.log("  Initial UPS:", initialUps.toString());
+  console.log("  Tail UPS:", tailUps.toString());
+  console.log("  Halving Period:", halvingPeriod.toString());
+
+  await hre.run("verify:verify", {
+    address: minterAddress,
+    contract: "contracts/Minter.sol:Minter",
+    constructorArguments: [
+      unitAddress,
+      rewarderAddress,
+      team,
       initialUps,
       tailUps,
       halvingPeriod,
-      epochPeriod,
-      priceMultiplier,
-      minInitPrice,
     ],
   });
-  console.log("Rig Verified:", rigAddress);
+  console.log("Minter Verified:", minterAddress);
 }
 
-async function verifyAuctionByRigIndex(rigIndex) {
-  const rigAddress = await core.deployedRigs(rigIndex);
-  const auctionAddress = await core.rigToAuction(rigAddress);
+async function verifyRewarderByContentIndex(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const rewarderAddress = await core.contentToRewarder(contentAddress);
+
+  console.log("Starting Rewarder Verification for:", rewarderAddress);
+  console.log("  Content:", contentAddress);
+
+  await hre.run("verify:verify", {
+    address: rewarderAddress,
+    contract: "contracts/Rewarder.sol:Rewarder",
+    constructorArguments: [contentAddress],
+  });
+  console.log("Rewarder Verified:", rewarderAddress);
+}
+
+async function verifyAuctionByContentIndex(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const auctionAddress = await core.contentToAuction(contentAddress);
   const auction = await ethers.getContractAt(
     "contracts/Auction.sol:Auction",
     auctionAddress
@@ -330,7 +409,6 @@ async function verifyAuctionByRigIndex(rigIndex) {
   const minInitPrice = await auction.minInitPrice();
 
   // Read current initPrice - this equals the constructor arg if epochId is still 0
-  // If someone has already bought, you may need to pass the original initPrice manually
   const epochId = await auction.epochId();
   const currentInitPrice = await auction.initPrice();
   const initPrice = epochId.eq(0) ? currentInitPrice : minInitPrice;
@@ -413,8 +491,16 @@ async function printDeployment() {
     unitFactory?.address || UNIT_FACTORY || "NOT DEPLOYED"
   );
   console.log(
-    "RigFactory:          ",
-    rigFactory?.address || RIG_FACTORY || "NOT DEPLOYED"
+    "ContentFactory:      ",
+    contentFactory?.address || CONTENT_FACTORY || "NOT DEPLOYED"
+  );
+  console.log(
+    "MinterFactory:       ",
+    minterFactory?.address || MINTER_FACTORY || "NOT DEPLOYED"
+  );
+  console.log(
+    "RewarderFactory:     ",
+    rewarderFactory?.address || REWARDER_FACTORY || "NOT DEPLOYED"
   );
   console.log(
     "AuctionFactory:      ",
@@ -435,8 +521,8 @@ async function printDeployment() {
       divDec(await core.minDonutForLaunch())
     );
     console.log(
-      "Deployed Rigs:       ",
-      (await core.deployedRigsLength()).toString()
+      "Deployed Contents:   ",
+      (await core.deployedContentsLength()).toString()
     );
   }
 
@@ -451,12 +537,52 @@ async function printCoreState() {
   console.log("DONUT:               ", await core.donutToken());
   console.log("Min DONUT:           ", divDec(await core.minDonutForLaunch()));
   console.log("Unit Factory:        ", await core.unitFactory());
-  console.log("Rig Factory:         ", await core.rigFactory());
+  console.log("Content Factory:     ", await core.contentFactory());
+  console.log("Minter Factory:      ", await core.minterFactory());
+  console.log("Rewarder Factory:    ", await core.rewarderFactory());
   console.log("Auction Factory:     ", await core.auctionFactory());
   console.log(
-    "Deployed Rigs:       ",
-    (await core.deployedRigsLength()).toString()
+    "Deployed Contents:   ",
+    (await core.deployedContentsLength()).toString()
   );
+  console.log("");
+}
+
+async function printContentInfo(contentIndex) {
+  const contentAddress = await core.deployedContents(contentIndex);
+  const unitAddress = await core.contentToUnit(contentAddress);
+  const minterAddress = await core.contentToMinter(contentAddress);
+  const rewarderAddress = await core.contentToRewarder(contentAddress);
+  const auctionAddress = await core.contentToAuction(contentAddress);
+  const lpAddress = await core.contentToLP(contentAddress);
+
+  const content = await ethers.getContractAt(
+    "contracts/Content.sol:Content",
+    contentAddress
+  );
+  const unit = await ethers.getContractAt(
+    "contracts/Unit.sol:Unit",
+    unitAddress
+  );
+  const minter = await ethers.getContractAt(
+    "contracts/Minter.sol:Minter",
+    minterAddress
+  );
+
+  console.log("\n--- Content #" + contentIndex + " ---");
+  console.log("Content:             ", contentAddress);
+  console.log("  Name:              ", await content.name());
+  console.log("  Symbol:            ", await content.symbol());
+  console.log("  Total Supply:      ", (await content.totalSupply()).toString());
+  console.log("  Is Moderated:      ", await content.isModerated());
+  console.log("Unit:                ", unitAddress);
+  console.log("  Total Supply:      ", divDec(await unit.totalSupply()));
+  console.log("Minter:              ", minterAddress);
+  console.log("  Weekly Emission:   ", divDec(await minter.weeklyEmission()));
+  console.log("  Current UPS:       ", (await minter.getUps()).toString());
+  console.log("Rewarder:            ", rewarderAddress);
+  console.log("Auction:             ", auctionAddress);
+  console.log("LP Token:            ", lpAddress);
   console.log("");
 }
 
@@ -482,7 +608,9 @@ async function main() {
 
   // console.log("Starting Deployment...");
   // await deployUnitFactory();
-  // await deployRigFactory();
+  // await deployContentFactory();
+  // await deployMinterFactory();
+  // await deployRewarderFactory();
   // await deployAuctionFactory();
   // await deployCore();
   // await deployMulticall();
@@ -494,7 +622,11 @@ async function main() {
   // console.log("Starting Verification...");
   // await verifyUnitFactory();
   // await sleep(5000);
-  // await verifyRigFactory();
+  // await verifyContentFactory();
+  // await sleep(5000);
+  // await verifyMinterFactory();
+  // await sleep(5000);
+  // await verifyRewarderFactory();
   // await sleep(5000);
   // await verifyAuctionFactory();
   // await sleep(5000);
@@ -502,15 +634,16 @@ async function main() {
   // await sleep(5000);
   // await verifyMulticall();
 
-  // Get Unit verification info for manual verification
-  // await getUnitVerificationInfo(0);
-
-  // await verifyUnitByRigIndex(0);
+  // Verify launched content contracts
+  // await verifyUnitByContentIndex(0);
   // await sleep(5000);
-  // await verifyRigByIndex(0);
+  // await verifyContentByIndex(0);
   // await sleep(5000);
-  // await verifyAuctionByRigIndex(0);
+  // await verifyMinterByContentIndex(0);
   // await sleep(5000);
+  // await verifyRewarderByContentIndex(0);
+  // await sleep(5000);
+  // await verifyAuctionByContentIndex(0);
 
   //===================================================================
   // 3. Configuration (optional)

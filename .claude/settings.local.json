@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(npx hardhat compile:*)",
+      "Bash(npm install:*)",
+      "Bash(npx hardhat test --parallel)",
+      "Bash(del teststestBusinessLogic.js teststestComprehensive.js teststestFactory.js teststestMulticallOnly.js teststestRigExploits.js teststestRigorous.js teststestUnitExploits.js)",
+      "Bash(npx hardhat test:*)",
+      "Bash(npx hardhat:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
