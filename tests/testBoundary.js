@@ -350,6 +350,7 @@ describe("Boundary Condition Tests", function () {
             unit.address,
             weth.address,
             auction.address,
+            owner.address, // team
             core.address,
             (await ethers.getContractFactory("RewarderFactory")).attach(
               await core.rewarderFactory()
@@ -370,6 +371,7 @@ describe("Boundary Condition Tests", function () {
             unit.address,
             weth.address,
             auction.address,
+            owner.address, // team
             core.address,
             (await ethers.getContractFactory("RewarderFactory")).attach(
               await core.rewarderFactory()

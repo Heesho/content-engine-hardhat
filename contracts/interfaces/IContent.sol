@@ -24,6 +24,7 @@ interface IContent {
     function distribute() external;
     function setUri(string memory _uri) external;
     function setTreasury(address _treasury) external;
+    function setTeam(address _team) external;
     function setIsModerated(bool _isModerated) external;
     function setModerators(address[] calldata accounts, bool isModerator) external;
     function approveContents(uint256[] calldata tokenIds) external;
@@ -35,6 +36,7 @@ interface IContent {
     function quote() external view returns (address);
     function core() external view returns (address);
     function treasury() external view returns (address);
+    function team() external view returns (address);
     function minInitPrice() external view returns (uint256);
     function uri() external view returns (string memory);
     function isModerated() external view returns (bool);

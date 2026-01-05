@@ -251,18 +251,20 @@ describe("Content Tests", function () {
       console.log("New price after collection:", divDec(newPrice), "WETH");
     });
 
-    it("Fee distribution is correct (80/15/4/1)", async function () {
+    it("Fee distribution is correct (80/15/2/2/1)", async function () {
       console.log("******************************************************");
       const contentContract = await ethers.getContractAt("Content", content);
 
       const tokenId = 3;
       const auctionData = await contentContract.getAuction(tokenId);
       const price = await contentContract.getPrice(tokenId);
+      const teamAddress = await contentContract.team();
 
       // Get balances before
       const user1WethBefore = await weth.balanceOf(user1.address);
       const auctionWethBefore = await weth.balanceOf(auction);
       const creatorWethBefore = await weth.balanceOf(creator1.address);
+      const teamWethBefore = await weth.balanceOf(teamAddress);
       const protocolWethBefore = await weth.balanceOf(protocol.address);
 
       // User2 collects from user1
@@ -275,25 +277,29 @@ describe("Content Tests", function () {
       const user1WethAfter = await weth.balanceOf(user1.address);
       const auctionWethAfter = await weth.balanceOf(auction);
       const creatorWethAfter = await weth.balanceOf(creator1.address);
+      const teamWethAfter = await weth.balanceOf(teamAddress);
       const protocolWethAfter = await weth.balanceOf(protocol.address);
 
       // Calculate received amounts
       const prevOwnerReceived = user1WethAfter.sub(user1WethBefore);
       const treasuryReceived = auctionWethAfter.sub(auctionWethBefore);
       const creatorReceived = creatorWethAfter.sub(creatorWethBefore);
+      const teamReceived = teamWethAfter.sub(teamWethBefore);
       const protocolReceived = protocolWethAfter.sub(protocolWethBefore);
 
       console.log("Price paid:", divDec(price));
       console.log("Previous owner (80%):", divDec(prevOwnerReceived));
       console.log("Treasury (15%):", divDec(treasuryReceived));
-      console.log("Creator (4%):", divDec(creatorReceived));
+      console.log("Creator (2%):", divDec(creatorReceived));
+      console.log("Team (2%):", divDec(teamReceived));
       console.log("Protocol (1%):", divDec(protocolReceived));
 
       // Verify percentages
       const tolerance = price.div(100); // 1% tolerance
       expect(prevOwnerReceived).to.be.closeTo(price.mul(8000).div(10000), tolerance);
       expect(treasuryReceived).to.be.closeTo(price.mul(1500).div(10000), tolerance);
-      expect(creatorReceived).to.be.closeTo(price.mul(400).div(10000), tolerance);
+      expect(creatorReceived).to.be.closeTo(price.mul(200).div(10000), tolerance);
+      expect(teamReceived).to.be.closeTo(price.mul(200).div(10000), tolerance);
       expect(protocolReceived).to.be.closeTo(price.mul(100).div(10000), tolerance);
     });
 

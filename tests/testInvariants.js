@@ -87,11 +87,12 @@ describe("Invariant Tests", function () {
     it("INVARIANT: Total fees always equal 100%", async function () {
       const PREVIOUS_OWNER_FEE = 8000;
       const TREASURY_FEE = 1500;
-      const CREATOR_FEE = 400;
+      const CREATOR_FEE = 200;
+      const TEAM_FEE = 200;
       const PROTOCOL_FEE = 100;
       const DIVISOR = 10000;
 
-      expect(PREVIOUS_OWNER_FEE + TREASURY_FEE + CREATOR_FEE + PROTOCOL_FEE).to.equal(DIVISOR);
+      expect(PREVIOUS_OWNER_FEE + TREASURY_FEE + CREATOR_FEE + TEAM_FEE + PROTOCOL_FEE).to.equal(DIVISOR);
     });
 
     it("INVARIANT: Price never exceeds initPrice", async function () {

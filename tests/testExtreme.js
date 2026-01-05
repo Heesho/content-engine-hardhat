@@ -477,6 +477,7 @@ describe("EXTREME Stress Tests", function () {
         const prevOwner = await content.ownerOf(tokenId);
         const creator = await content.id_Creator(tokenId);
         const treasury = await content.treasury();
+        const team = await content.team();
         const protocolFee = await core.protocolFeeAddress();
 
         // Make sure prevOwner and creator are different
@@ -485,6 +486,7 @@ describe("EXTREME Stress Tests", function () {
 
         const prevOwnerBefore = await weth.balanceOf(prevOwner);
         const treasuryBefore = await weth.balanceOf(treasury);
+        const teamBefore = await weth.balanceOf(team);
         const protocolBefore = await weth.balanceOf(protocolFee);
 
         await weth.connect(user2).approve(content.address, maxPrice);
@@ -501,20 +503,23 @@ describe("EXTREME Stress Tests", function () {
 
         const prevOwnerAfter = await weth.balanceOf(prevOwner);
         const treasuryAfter = await weth.balanceOf(treasury);
+        const teamAfter = await weth.balanceOf(team);
         const protocolAfter = await weth.balanceOf(protocolFee);
 
-        // prevOwner gets 80% + 4% (since prevOwner == creator in this case)
+        // prevOwner gets 80% + 2% (since prevOwner == creator in this case)
         const prevOwnerFee = prevOwnerAfter.sub(prevOwnerBefore);
         const treasuryFee = treasuryAfter.sub(treasuryBefore);
+        const teamFee = teamAfter.sub(teamBefore);
         const protocolFeeAmt = protocolAfter.sub(protocolBefore);
 
         // Total should equal actual price paid
-        const totalFees = prevOwnerFee.add(treasuryFee).add(protocolFeeAmt);
+        const totalFees = prevOwnerFee.add(treasuryFee).add(teamFee).add(protocolFeeAmt);
         expect(totalFees).to.equal(actualPrice);
 
         console.log(`Actual Price: ${divDec(actualPrice)}`);
-        console.log(`PrevOwner+Creator (84%): ${divDec(prevOwnerFee)}`);
+        console.log(`PrevOwner+Creator (82%): ${divDec(prevOwnerFee)}`);
         console.log(`Treasury (15%): ${divDec(treasuryFee)}`);
+        console.log(`Team (2%): ${divDec(teamFee)}`);
         console.log(`Protocol (1%): ${divDec(protocolFeeAmt)}`);
       }
     });

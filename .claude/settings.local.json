@@ -9,7 +9,9 @@
       "Bash(del teststestBusinessLogic.js teststestComprehensive.js teststestFactory.js teststestMulticallOnly.js teststestRigExploits.js teststestRigorous.js teststestUnitExploits.js)",
       "Bash(npx hardhat test:*)",
       "Bash(npx hardhat:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRefactor to Content Engine: NFT collection platform with Dutch auctions\n\nReplace Rig-based mining system with Content-based collection system:\n\n- Add Content.sol: ERC721 NFT contract with Dutch auction \"steal\" mechanic\n- Add ContentFactory.sol: Factory for deploying Content contracts\n- Add Minter.sol: Bitcoin-style halving emission controller\n- Add MinterFactory.sol: Factory for deploying Minter contracts\n- Add Rewarder.sol: Synthetix-style stake-based reward distribution\n- Add RewarderFactory.sol: Factory for deploying Rewarder contracts\n- Update Core.sol: Orchestrator for launching content ecosystems\n- Update Multicall.sol: Helper for ETH wrapping and batch queries\n- Update Unit.sol: ERC20 token with controlled minting\n- Remove Rig.sol, RigFactory.sol and related interfaces\n\nFee structure: 80% previous owner, 15% treasury, 4% creator, 1% protocol\n\nNew test suite with 263 passing tests:\n- testContent.js: Core functionality\n- testSecurityAudit.js: Security-focused tests\n- testExtreme.js: Stress and edge cases\n- testBoundary.js: Boundary conditions\n- testInvariants.js: State invariants\n\nAdd comprehensive README with full documentation\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)"
     ]
   }
 }

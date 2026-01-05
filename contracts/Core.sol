@@ -252,6 +252,7 @@ contract Core is Ownable, ReentrancyGuard {
             unit,
             weth,
             auction,
+            params.launcher, // team address = launcher
             address(this),
             rewarderFactory,
             params.contentMinInitPrice,

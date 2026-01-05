@@ -17,7 +17,7 @@ import {ICore} from "./interfaces/ICore.sol";
  * @notice NFT collection where collectors can "steal" content by paying a dutch auction price.
  *         The purchase price determines the owner's stake in the Rewarder, earning them Unit rewards.
  * @dev Each content has a dutch auction that resets after collection with a 2x price multiplier.
- *      Fees: 80% to previous owner, 15% to treasury, 4% to creator, 1% to protocol.
+ *      Fees: 80% to previous owner, 15% to treasury, 2% to creator, 2% to team, 1% to protocol.
  */
 contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
@@ -26,7 +26,8 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
 
     uint256 public constant PREVIOUS_OWNER_FEE = 8_000; // 80% to previous owner
     uint256 public constant TREASURY_FEE = 1_500; // 15% to treasury (auction)
-    uint256 public constant CREATOR_FEE = 400; // 4% to creator
+    uint256 public constant CREATOR_FEE = 200; // 2% to creator
+    uint256 public constant TEAM_FEE = 200; // 2% to team
     uint256 public constant PROTOCOL_FEE = 100; // 1% to protocol
     uint256 public constant DIVISOR = 10_000;
     uint256 public constant PRECISION = 1e18;
@@ -46,6 +47,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
 
     string public uri;
     address public treasury;
+    address public team;
 
     bool public isModerated;
     mapping(address => bool) public account_IsModerator;
@@ -78,6 +80,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     error Content__AlreadyApproved();
     error Content__NotModerator();
     error Content__InvalidTreasury();
+    error Content__InvalidTeam();
     error Content__InvalidCore();
     error Content__InvalidUnit();
     error Content__InvalidQuote();
@@ -95,6 +98,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     event Content__Distributed(uint256 quoteAmount, uint256 unitAmount);
     event Content__UriSet(string uri);
     event Content__TreasurySet(address indexed treasury);
+    event Content__TeamSet(address indexed team);
     event Content__IsModeratedSet(bool isModerated);
     event Content__ModeratorsSet(address indexed account, bool isModerator);
     event Content__Approved(address indexed moderator, uint256 indexed tokenId);
@@ -110,6 +114,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
      * @param _unit Unit token address
      * @param _quote Quote token (WETH) address
      * @param _treasury Treasury (Auction) address for fee collection
+     * @param _team Team address for fee collection
      * @param _core Core contract address
      * @param _rewarderFactory RewarderFactory address
      * @param _minInitPrice Minimum starting auction price
@@ -122,6 +127,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         address _unit,
         address _quote,
         address _treasury,
+        address _team,
         address _core,
         address _rewarderFactory,
         uint256 _minInitPrice,
@@ -132,12 +138,14 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         if (_unit == address(0)) revert Content__InvalidUnit();
         if (_quote == address(0)) revert Content__InvalidQuote();
         if (_treasury == address(0)) revert Content__InvalidTreasury();
+        if (_team == address(0)) revert Content__InvalidTeam();
         if (_core == address(0)) revert Content__InvalidCore();
 
         uri = _uri;
         unit = _unit;
         quote = _quote;
         treasury = _treasury;
+        team = _team;
         core = _core;
         minInitPrice = _minInitPrice;
         isModerated = _isModerated;
@@ -234,12 +242,14 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
             address protocolFeeAddr = ICore(core).protocolFeeAddress();
             uint256 prevOwnerAmount = price * PREVIOUS_OWNER_FEE / DIVISOR;
             uint256 creatorAmount = price * CREATOR_FEE / DIVISOR;
+            uint256 teamAmount = price * TEAM_FEE / DIVISOR;
             uint256 protocolAmount = protocolFeeAddr != address(0) ? price * PROTOCOL_FEE / DIVISOR : 0;
-            uint256 treasuryAmount = price - prevOwnerAmount - creatorAmount - protocolAmount;
+            uint256 treasuryAmount = price - prevOwnerAmount - creatorAmount - teamAmount - protocolAmount;
 
             // Distribute fees
             IERC20(quote).safeTransfer(prevOwner, prevOwnerAmount);
             IERC20(quote).safeTransfer(creator, creatorAmount);
+            IERC20(quote).safeTransfer(team, teamAmount);
             IERC20(quote).safeTransfer(treasury, treasuryAmount);
 
             if (protocolAmount > 0) {
@@ -333,6 +343,16 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         if (_treasury == address(0)) revert Content__InvalidTreasury();
         treasury = _treasury;
         emit Content__TreasurySet(_treasury);
+    }
+
+    /**
+     * @notice Update the team address.
+     * @param _team New team address
+     */
+    function setTeam(address _team) external onlyOwner {
+        if (_team == address(0)) revert Content__InvalidTeam();
+        team = _team;
+        emit Content__TeamSet(_team);
     }
 
     /**

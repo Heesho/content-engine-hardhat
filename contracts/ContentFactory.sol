@@ -18,6 +18,7 @@ contract ContentFactory {
      * @param _unit Unit token address
      * @param _quote Quote token (WETH) address
      * @param _treasury Treasury (Auction) address
+     * @param _team Team address for fee collection
      * @param _core Core contract address
      * @param _rewarderFactory RewarderFactory address
      * @param _minInitPrice Minimum starting auction price
@@ -31,6 +32,7 @@ contract ContentFactory {
         address _unit,
         address _quote,
         address _treasury,
+        address _team,
         address _core,
         address _rewarderFactory,
         uint256 _minInitPrice,
@@ -43,6 +45,7 @@ contract ContentFactory {
             _unit,
             _quote,
             _treasury,
+            _team,
             _core,
             _rewarderFactory,
             _minInitPrice,

@@ -14,6 +14,7 @@ interface IContentFactory {
         address _unit,
         address _quote,
         address _treasury,
+        address _team,
         address _core,
         address _rewarderFactory,
         uint256 _minInitPrice,

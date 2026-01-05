@@ -62,8 +62,9 @@ Content Engine is a revolutionary platform that turns content into collectible a
 Think of it like a game where content continuously changes hands, and holding valuable content earns you rewards over time.
 
 **Key Benefits:**
-- **For Creators**: Earn 4% every time your content changes hands, forever
+- **For Creators**: Earn 2% every time your content changes hands, forever
 - **For Collectors**: Earn rewards proportional to your stake, plus 80% when someone steals from you
+- **For Teams**: Earn 2% of all collections as the platform launcher
 - **For the Platform**: 15% goes to treasury, fueling ecosystem growth
 
 ---
@@ -80,7 +81,7 @@ Creating content is simple:
 
 2. **Your content becomes an NFT** that can be collected
 
-3. **Earn 4% forever** every time your content changes hands
+3. **Earn 2% forever** every time your content changes hands
 
 ```
 Creator publishes content
@@ -92,7 +93,7 @@ NFT is minted to creator
 Content is now collectible
         |
         v
-Every collection = 4% to creator
+Every collection = 2% to creator
 ```
 
 ### For Collectors
@@ -230,14 +231,16 @@ When content is collected, the payment is split:
 |-----------|------------|-------------|
 | Previous Owner | 80% | Reward for holding content |
 | Treasury | 15% | Funds ecosystem via Auction |
-| Creator | 4% | Ongoing royalty for content creator |
+| Creator | 2% | Ongoing royalty for content creator |
+| Team | 2% | Platform/launcher team fee |
 | Protocol | 1% | Platform maintenance fee |
 
 **Example with 1 ETH collection:**
 ```
 Previous Owner: 0.80 ETH
 Treasury:       0.15 ETH
-Creator:        0.04 ETH
+Creator:        0.02 ETH
+Team:           0.02 ETH
 Protocol:       0.01 ETH
 ```
 
@@ -355,7 +358,8 @@ event Content__Distributed(uint256 quoteAmount, uint256 unitAmount);
 |----------|-------|-------------|
 | `PREVIOUS_OWNER_FEE` | 8000 (80%) | Fee to previous owner |
 | `TREASURY_FEE` | 1500 (15%) | Fee to treasury |
-| `CREATOR_FEE` | 400 (4%) | Fee to creator |
+| `CREATOR_FEE` | 200 (2%) | Fee to creator |
+| `TEAM_FEE` | 200 (2%) | Fee to team |
 | `PROTOCOL_FEE` | 100 (1%) | Fee to protocol |
 | `EPOCH_PERIOD` | 30 days | Dutch auction duration |
 | `PRICE_MULTIPLIER` | 2e18 (2x) | Price increase per epoch |
@@ -644,7 +648,8 @@ Collector pays WETH to collect content
            │
            ├──► 80% to Previous Owner
            ├──► 15% to Treasury (Auction)
-           ├──► 4% to Creator
+           ├──► 2% to Creator
+           ├──► 2% to Team
            └──► 1% to Protocol
 
 Minter produces UNIT tokens
@@ -978,6 +983,7 @@ This codebase has undergone comprehensive security review:
 
 **Owner Controlled:**
 - Treasury address
+- Team address
 - Moderation mode
 - Moderator list
 - Metadata URI
