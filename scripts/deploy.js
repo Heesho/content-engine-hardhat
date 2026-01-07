@@ -758,7 +758,7 @@ async function main() {
   // await sleep(5000);
   // await verifyCore();
   // await sleep(5000);
-  await verifyMulticall();
+  // await verifyMulticall();
 
   // Verify launched content contracts
   // await verifyUnitByContentIndex(0);
