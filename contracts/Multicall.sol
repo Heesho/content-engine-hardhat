@@ -50,6 +50,7 @@ contract Multicall {
         uint256 accountQuoteBalance;
         uint256 accountUnitBalance;
         uint256 accountContentOwned;
+        uint256 accountContentStaked;
         uint256 accountUnitEarned;
         bool accountIsModerator;
     }
@@ -257,6 +258,7 @@ contract Multicall {
             state.accountQuoteBalance = IERC20(state.quote).balanceOf(account);
             state.accountUnitBalance = IERC20(state.unit).balanceOf(account);
             state.accountContentOwned = IContent(content).balanceOf(account);
+            state.accountContentStaked = IRewarder(state.rewarder).account_Balance(account);
             state.accountUnitEarned = IRewarder(state.rewarder).earned(account, state.unit);
             state.accountIsModerator =
                 IContent(content).owner() == account || IContent(content).account_IsModerator(account);
