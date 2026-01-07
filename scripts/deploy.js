@@ -11,8 +11,10 @@ const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
 // =============================================================================
 
 // Base Mainnet addresses
-const WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
-const DONUT_ADDRESS = "0xae4a37d554c6d6f3e398546d8566b25052e0169c"; // TODO: Set DONUT token address
+// For testing: leave addresses empty to deploy mocks
+// For mainnet: set to real token addresses
+let USDC_ADDRESS = ""; // Set to "" to deploy MockUSDC, or "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" for Base mainnet
+let DONUT_ADDRESS = ""; // Set to "" to deploy MockDONUT, or real DONUT address for mainnet
 const UNISWAP_V2_FACTORY = "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6";
 const UNISWAP_V2_ROUTER = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24";
 
@@ -22,22 +24,56 @@ const MULTISIG_ADDRESS = "0xeE0CB49D2805DA6bC0A979ddAd87bb793fbB765E";
 const MIN_DONUT_FOR_LAUNCH = convert("1000", 18); // 1000 DONUT minimum
 
 // Deployed Contract Addresses (paste after deployment)
-const UNIT_FACTORY = "";
-const CONTENT_FACTORY = "";
-const MINTER_FACTORY = "";
-const REWARDER_FACTORY = "";
-const AUCTION_FACTORY = "";
-const CORE = "";
-const MULTICALL = "";
+const MOCK_USDC = "0xe90495BE187d434e23A9B1FeC0B6Ce039700870e"; // If deployed MockUSDC, paste address here
+const MOCK_DONUT = "0xD50B69581362C60Ce39596B237C71e07Fc4F6fdA"; // If deployed MockDONUT, paste address here
+const UNIT_FACTORY = "0x74D955AD4E2C6DfFBfc92237E14C5Cdc737D0255";
+const CONTENT_FACTORY = "0xaF281Dc0c3df991c6BfF420Dbe4A7ceb8F80aae5";
+const MINTER_FACTORY = "0xDb1d9889a8fe361797bbFD7E583479670F998DD9";
+const REWARDER_FACTORY = "0x886b09ae0b1ea4704aA0e26591Fe6447012aB285";
+const AUCTION_FACTORY = "0xf58007522849725658C2C6E337bFC2b9ca6508E7";
+const CORE = "0x1595905587751a7777dC6edc740bfCF5707cb42e";
+const MULTICALL = "0xa544D354e1Eb1421B70F7Cd22c16abdeA1EA3795";
 
 // Contract Variables
-let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory, core, multicall;
+let mockUsdc,
+  mockDonut,
+  unitFactory,
+  contentFactory,
+  minterFactory,
+  rewarderFactory,
+  auctionFactory,
+  core,
+  multicall;
 
 // =============================================================================
 // GET CONTRACTS
 // =============================================================================
 
 async function getContracts() {
+  // Set USDC address from deployed mock or config
+  if (MOCK_USDC) {
+    USDC_ADDRESS = MOCK_USDC;
+    mockUsdc = await ethers.getContractAt(
+      "contracts/mocks/MockUSDC.sol:MockUSDC",
+      MOCK_USDC
+    );
+    console.log("Using MockUSDC at:", MOCK_USDC);
+  } else if (USDC_ADDRESS) {
+    console.log("Using USDC at:", USDC_ADDRESS);
+  }
+
+  // Set DONUT address from deployed mock or config
+  if (MOCK_DONUT) {
+    DONUT_ADDRESS = MOCK_DONUT;
+    mockDonut = await ethers.getContractAt(
+      "contracts/mocks/MockDONUT.sol:MockDONUT",
+      MOCK_DONUT
+    );
+    console.log("Using MockDONUT at:", MOCK_DONUT);
+  } else if (DONUT_ADDRESS) {
+    console.log("Using DONUT at:", DONUT_ADDRESS);
+  }
+
   if (UNIT_FACTORY) {
     unitFactory = await ethers.getContractAt(
       "contracts/UnitFactory.sol:UnitFactory",
@@ -90,6 +126,26 @@ async function getContracts() {
 // =============================================================================
 // DEPLOY FUNCTIONS
 // =============================================================================
+
+async function deployMockUSDC() {
+  console.log("Starting MockUSDC Deployment");
+  const artifact = await ethers.getContractFactory("MockUSDC");
+  const contract = await artifact.deploy({ gasPrice: ethers.gasPrice });
+  mockUsdc = await contract.deployed();
+  USDC_ADDRESS = mockUsdc.address;
+  await sleep(5000);
+  console.log("MockUSDC Deployed at:", mockUsdc.address);
+}
+
+async function deployMockDONUT() {
+  console.log("Starting MockDONUT Deployment");
+  const artifact = await ethers.getContractFactory("MockDONUT");
+  const contract = await artifact.deploy({ gasPrice: ethers.gasPrice });
+  mockDonut = await contract.deployed();
+  DONUT_ADDRESS = mockDonut.address;
+  await sleep(5000);
+  console.log("MockDONUT Deployed at:", mockDonut.address);
+}
 
 async function deployUnitFactory() {
   console.log("Starting UnitFactory Deployment");
@@ -145,10 +201,15 @@ async function deployCore() {
   if (!DONUT_ADDRESS) {
     throw new Error("DONUT_ADDRESS must be set before deployment");
   }
+  if (!USDC_ADDRESS) {
+    throw new Error(
+      "USDC_ADDRESS must be set before deployment (deploy MockUSDC first or set address)"
+    );
+  }
 
   const artifact = await ethers.getContractFactory("Core");
   const contract = await artifact.deploy(
-    WETH_ADDRESS,
+    USDC_ADDRESS,
     DONUT_ADDRESS,
     UNISWAP_V2_FACTORY,
     UNISWAP_V2_ROUTER,
@@ -168,10 +229,13 @@ async function deployCore() {
 
 async function deployMulticall() {
   console.log("Starting Multicall Deployment");
+  if (!USDC_ADDRESS) {
+    throw new Error("USDC_ADDRESS must be set before deployment");
+  }
   const artifact = await ethers.getContractFactory("Multicall");
   const contract = await artifact.deploy(
     core.address,
-    WETH_ADDRESS,
+    USDC_ADDRESS,
     DONUT_ADDRESS,
     {
       gasPrice: ethers.gasPrice,
@@ -242,7 +306,7 @@ async function verifyCore() {
     address: core?.address || CORE,
     contract: "contracts/Core.sol:Core",
     constructorArguments: [
-      WETH_ADDRESS,
+      USDC_ADDRESS,
       DONUT_ADDRESS,
       UNISWAP_V2_FACTORY,
       UNISWAP_V2_ROUTER,
@@ -263,9 +327,29 @@ async function verifyMulticall() {
   await hre.run("verify:verify", {
     address: multicall?.address || MULTICALL,
     contract: "contracts/Multicall.sol:Multicall",
-    constructorArguments: [core?.address || CORE, WETH_ADDRESS, DONUT_ADDRESS],
+    constructorArguments: [core?.address || CORE, USDC_ADDRESS, DONUT_ADDRESS],
   });
   console.log("Multicall Verified");
+}
+
+async function verifyMockUSDC() {
+  console.log("Starting MockUSDC Verification");
+  await hre.run("verify:verify", {
+    address: mockUsdc?.address || MOCK_USDC,
+    contract: "contracts/mocks/MockUSDC.sol:MockUSDC",
+    constructorArguments: [],
+  });
+  console.log("MockUSDC Verified");
+}
+
+async function verifyMockDONUT() {
+  console.log("Starting MockDONUT Verification");
+  await hre.run("verify:verify", {
+    address: mockDonut?.address || MOCK_DONUT,
+    contract: "contracts/mocks/MockDONUT.sol:MockDONUT",
+    constructorArguments: [],
+  });
+  console.log("MockDONUT Verified");
 }
 
 async function verifyUnitByContentIndex(contentIndex) {
@@ -473,6 +557,26 @@ async function transferCoreOwnership(newOwner) {
   console.log("Core ownership transferred");
 }
 
+async function mintMockUSDC(toAddress, amount) {
+  if (!mockUsdc) {
+    throw new Error("MockUSDC not deployed - cannot mint");
+  }
+  console.log("Minting", divDec(amount, 6), "MockUSDC to:", toAddress);
+  const tx = await mockUsdc.mint(toAddress, amount);
+  await tx.wait();
+  console.log("MockUSDC minted");
+}
+
+async function mintMockDONUT(toAddress, amount) {
+  if (!mockDonut) {
+    throw new Error("MockDONUT not deployed - cannot mint");
+  }
+  console.log("Minting", divDec(amount, 18), "MockDONUT to:", toAddress);
+  const tx = await mockDonut.mint(toAddress, amount);
+  await tx.wait();
+  console.log("MockDONUT minted");
+}
+
 // =============================================================================
 // PRINT FUNCTIONS
 // =============================================================================
@@ -481,7 +585,7 @@ async function printDeployment() {
   console.log("\n==================== DEPLOYMENT ====================\n");
 
   console.log("--- Configuration ---");
-  console.log("WETH:                ", WETH_ADDRESS);
+  console.log("USDC (Quote):        ", USDC_ADDRESS || "NOT SET");
   console.log("DONUT:               ", DONUT_ADDRESS || "NOT SET");
   console.log("Uniswap V2 Factory:  ", UNISWAP_V2_FACTORY);
   console.log("Uniswap V2 Router:   ", UNISWAP_V2_ROUTER);
@@ -489,6 +593,14 @@ async function printDeployment() {
   console.log("Min DONUT for Launch:", divDec(MIN_DONUT_FOR_LAUNCH));
 
   console.log("\n--- Deployed Contracts ---");
+  console.log(
+    "MockUSDC:            ",
+    mockUsdc?.address || MOCK_USDC || "NOT DEPLOYED (using real USDC)"
+  );
+  console.log(
+    "MockDONUT:           ",
+    mockDonut?.address || MOCK_DONUT || "NOT DEPLOYED (using real DONUT)"
+  );
   console.log(
     "UnitFactory:         ",
     unitFactory?.address || UNIT_FACTORY || "NOT DEPLOYED"
@@ -536,7 +648,7 @@ async function printCoreState() {
   console.log("\n--- Core State ---");
   console.log("Owner:               ", await core.owner());
   console.log("Protocol Fee Address:", await core.protocolFeeAddress());
-  console.log("WETH:                ", await core.weth());
+  console.log("Quote (USDC):        ", await core.quote());
   console.log("DONUT:               ", await core.donutToken());
   console.log("Min DONUT:           ", divDec(await core.minDonutForLaunch()));
   console.log("Unit Factory:        ", await core.unitFactory());
@@ -576,7 +688,10 @@ async function printContentInfo(contentIndex) {
   console.log("Content:             ", contentAddress);
   console.log("  Name:              ", await content.name());
   console.log("  Symbol:            ", await content.symbol());
-  console.log("  Total Supply:      ", (await content.totalSupply()).toString());
+  console.log(
+    "  Total Supply:      ",
+    (await content.totalSupply()).toString()
+  );
   console.log("  Is Moderated:      ", await content.isModerated());
   console.log("  Treasury:          ", await content.treasury());
   console.log("  Team:              ", await content.team());
@@ -612,6 +727,8 @@ async function main() {
   //===================================================================
 
   // console.log("Starting Deployment...");
+  // await deployMockUSDC(); // Deploy MockUSDC for testing (skip for mainnet)
+  // await deployMockDONUT(); // Deploy MockDONUT for testing (skip for mainnet)
   // await deployUnitFactory();
   // await deployContentFactory();
   // await deployMinterFactory();
@@ -625,6 +742,10 @@ async function main() {
   //===================================================================
 
   // console.log("Starting Verification...");
+  // await verifyMockUSDC(); // Only if MockUSDC was deployed
+  // await sleep(5000);
+  // await verifyMockDONUT(); // Only if MockDONUT was deployed
+  // await sleep(5000);
   // await verifyUnitFactory();
   // await sleep(5000);
   // await verifyContentFactory();
@@ -637,7 +758,7 @@ async function main() {
   // await sleep(5000);
   // await verifyCore();
   // await sleep(5000);
-  // await verifyMulticall();
+  await verifyMulticall();
 
   // Verify launched content contracts
   // await verifyUnitByContentIndex(0);

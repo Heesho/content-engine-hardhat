@@ -1,5 +1,6 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
@@ -7,7 +8,7 @@ const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
 let owner, protocol, user0, user1, user2;
-let weth, donut, core, multicall;
+let usdc, donut, core, multicall;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -19,13 +20,14 @@ describe("Core Launch Tests", function () {
 
     [owner, protocol, user0, user1, user2] = await ethers.getSigners();
 
-    // Deploy WETH
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    console.log("- WETH Initialized");
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+    console.log("- USDC Initialized");
 
     // Deploy mock DONUT token
-    donut = await wethArtifact.deploy();
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
     console.log("- DONUT Initialized");
 
     // Deploy mock Uniswap V2 Factory and Router
@@ -61,7 +63,7 @@ describe("Core Launch Tests", function () {
     // Deploy Core
     const coreArtifact = await ethers.getContractFactory("Core");
     core = await coreArtifact.deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -77,7 +79,7 @@ describe("Core Launch Tests", function () {
 
     // Deploy Multicall
     const multicallArtifact = await ethers.getContractFactory("Multicall");
-    multicall = await multicallArtifact.deploy(core.address, weth.address, donut.address);
+    multicall = await multicallArtifact.deploy(core.address, usdc.address, donut.address);
     console.log("- Multicall Initialized");
 
     // Mint DONUT to user0 for launching
@@ -91,7 +93,7 @@ describe("Core Launch Tests", function () {
     console.log("******************************************************");
     expect(await core.protocolFeeAddress()).to.equal(protocol.address);
     expect(await core.donutToken()).to.equal(donut.address);
-    expect(await core.weth()).to.equal(weth.address);
+    expect(await core.quote()).to.equal(usdc.address);
     expect(await core.minDonutForLaunch()).to.equal(convert("100", 18));
     expect(await core.deployedContentsLength()).to.equal(0);
     console.log("Core state verified");
@@ -110,12 +112,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18), // 4 tokens per second
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7, // 7 days (minimum)
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400, // 1 day
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     // Approve DONUT
@@ -193,10 +195,10 @@ describe("Core Launch Tests", function () {
     const contentContract = await ethers.getContractAt("Content", content);
 
     expect(await contentContract.unit()).to.equal(unit);
-    expect(await contentContract.quote()).to.equal(weth.address);
+    expect(await contentContract.quote()).to.equal(usdc.address);
     expect(await contentContract.treasury()).to.equal(auction);
     expect(await contentContract.core()).to.equal(core.address);
-    expect(await contentContract.minInitPrice()).to.equal(convert("0.001", 18));
+    expect(await contentContract.minInitPrice()).to.equal(convert("1", 6));
     expect(await contentContract.isModerated()).to.equal(false);
 
     console.log("Content parameters verified");
@@ -228,12 +230,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -257,12 +259,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -286,12 +288,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -315,12 +317,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -344,12 +346,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -405,12 +407,12 @@ describe("Core Launch Tests", function () {
       initialUps: convert("2", 18),
       tailUps: convert("0.005", 18),
       halvingPeriod: 86400 * 14, // 14 days
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("100", 6),
       contentIsModerated: true, // moderated
-      auctionInitPrice: convert("2", 18),
+      auctionInitPrice: convert("2000", 6),
       auctionEpochPeriod: 86400 * 2,
       auctionPriceMultiplier: convert("2", 18),
-      auctionMinInitPrice: convert("0.01", 18),
+      auctionMinInitPrice: convert("10", 6),
     };
 
     // Mint and approve DONUT for user1

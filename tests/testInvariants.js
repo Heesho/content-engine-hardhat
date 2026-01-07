@@ -1,14 +1,23 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 describe("Invariant Tests", function () {
   let owner, user1, user2, user3, user4, user5;
-  let weth, donut, core;
+  let usdc, donut, core;
   let content, minter, rewarder, auction, unit, lpToken;
 
   const WEEK = 7 * 24 * 60 * 60;
@@ -19,9 +28,12 @@ describe("Invariant Tests", function () {
     await network.provider.send("hardhat_reset");
     [owner, user1, user2, user3, user4, user5] = await ethers.getSigners();
 
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
     const uniswapFactory = await mockUniswapFactoryArtifact.deploy();
@@ -36,7 +48,7 @@ describe("Invariant Tests", function () {
     const auctionFactory = await (await ethers.getContractFactory("AuctionFactory")).deploy();
 
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -51,7 +63,7 @@ describe("Invariant Tests", function () {
 
     for (const user of [owner, user1, user2, user3, user4, user5]) {
       await donut.connect(user).deposit({ value: convert("1000", 18) });
-      await weth.connect(user).deposit({ value: convert("1000", 18) });
+      await usdc.mint(user.address, convert("1000", 6));
     }
 
     await donut.connect(owner).approve(core.address, convert("1000", 18));
@@ -65,12 +77,12 @@ describe("Invariant Tests", function () {
       initialUps: convert("1", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     });
 
     const receipt = await tx.wait();
@@ -87,8 +99,8 @@ describe("Invariant Tests", function () {
     it("INVARIANT: Total fees always equal 100%", async function () {
       const PREVIOUS_OWNER_FEE = 8000;
       const TREASURY_FEE = 1500;
-      const CREATOR_FEE = 200;
-      const TEAM_FEE = 200;
+      const CREATOR_FEE = 300;
+      const TEAM_FEE = 100;
       const PROTOCOL_FEE = 100;
       const DIVISOR = 10000;
 
@@ -99,7 +111,7 @@ describe("Invariant Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://invariant-price");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
 
       // Check at multiple time points
       for (let i = 0; i <= 30; i++) {
@@ -132,14 +144,14 @@ describe("Invariant Tests", function () {
       let prevEpochId = ethers.BigNumber.from(0);
 
       for (let i = 0; i < 5; i++) {
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         expect(auctionData.epochId).to.be.gte(prevEpochId);
         prevEpochId = auctionData.epochId;
 
         const price = await content.getPrice(tokenId);
         if (price.gt(0)) {
           const collector = [user2, user3, user4, user5][i % 4];
-          await weth.connect(collector).approve(content.address, price);
+          await usdc.connect(collector).approve(content.address, price);
           await content.connect(collector).collect(
             collector.address,
             tokenId,
@@ -161,13 +173,13 @@ describe("Invariant Tests", function () {
 
       // Collect multiple times
       for (let i = 0; i < 3; i++) {
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         expect(auctionData.initPrice).to.be.gte(minInitPrice);
 
         const price = await content.getPrice(tokenId);
         if (price.gt(0)) {
           const collector = [user2, user3][i % 2];
-          await weth.connect(collector).approve(content.address, price);
+          await usdc.connect(collector).approve(content.address, price);
           await content.connect(collector).collect(
             collector.address,
             tokenId,
@@ -180,7 +192,7 @@ describe("Invariant Tests", function () {
           await ethers.provider.send("evm_increaseTime", [31 * DAY]);
           await ethers.provider.send("evm_mine");
 
-          const newAuction = await content.getAuction(tokenId);
+          const newAuction = await getAuctionData(content, tokenId);
           const collector = [user2, user3][i % 2];
           await content.connect(collector).collect(
             collector.address,
@@ -192,7 +204,7 @@ describe("Invariant Tests", function () {
         }
       }
 
-      const finalAuction = await content.getAuction(tokenId);
+      const finalAuction = await getAuctionData(content, tokenId);
       expect(finalAuction.initPrice).to.be.gte(minInitPrice);
     });
 
@@ -200,10 +212,10 @@ describe("Invariant Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://invariant-stake");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const priceBefore = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, priceBefore);
+      await usdc.connect(user2).approve(content.address, priceBefore);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -227,10 +239,10 @@ describe("Invariant Tests", function () {
       const ownerBefore = await content.ownerOf(tokenId);
       expect(ownerBefore).to.equal(user1.address);
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -253,12 +265,12 @@ describe("Invariant Tests", function () {
 
       // Multiple collections
       for (let i = 0; i < 3; i++) {
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         const price = await content.getPrice(tokenId);
 
         if (price.gt(0)) {
           const collector = [user4, user5][i % 2];
-          await weth.connect(collector).approve(content.address, price);
+          await usdc.connect(collector).approve(content.address, price);
           await content.connect(collector).collect(
             collector.address,
             tokenId,
@@ -334,11 +346,11 @@ describe("Invariant Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://invariant-totalsupply");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const priceBefore = await content.getPrice(tokenId);
 
       if (priceBefore.gt(0)) {
-        await weth.connect(user2).approve(content.address, priceBefore);
+        await usdc.connect(user2).approve(content.address, priceBefore);
         await content.connect(user2).collect(
           user2.address,
           tokenId,
@@ -360,11 +372,11 @@ describe("Invariant Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://invariant-earned");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
-        await weth.connect(user4).approve(content.address, price);
+        await usdc.connect(user4).approve(content.address, price);
         await content.connect(user4).collect(
           user4.address,
           tokenId,
@@ -444,7 +456,7 @@ describe("Invariant Tests", function () {
 
       // Send assets and buy multiple times
       for (let i = 0; i < 3; i++) {
-        await weth.connect(user1).transfer(auction.address, convert("1", 18));
+        await usdc.connect(user1).transfer(auction.address, convert("1", 6));
 
         // Wait for price to decay
         const epochPeriod = await auction.epochPeriod();
@@ -455,7 +467,7 @@ describe("Invariant Tests", function () {
         expect(epochId).to.be.gte(prevEpochId);
 
         await auction.connect(user2).buy(
-          [weth.address],
+          [usdc.address],
           user2.address,
           epochId,
           ethers.constants.MaxUint256,

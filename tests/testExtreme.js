@@ -1,13 +1,22 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 let owner, protocol, launcher, attacker, user1, user2, user3, user4, user5;
-let weth, donut, core, multicall;
+let usdc, donut, core, multicall;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -23,9 +32,12 @@ describe("EXTREME Stress Tests", function () {
 
     [owner, protocol, launcher, attacker, user1, user2, user3, user4, user5] = await ethers.getSigners();
 
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
     uniswapFactory = await mockUniswapFactoryArtifact.deploy();
@@ -50,7 +62,7 @@ describe("EXTREME Stress Tests", function () {
 
     const coreArtifact = await ethers.getContractFactory("Core");
     core = await coreArtifact.deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -64,12 +76,12 @@ describe("EXTREME Stress Tests", function () {
     );
 
     const multicallArtifact = await ethers.getContractFactory("Multicall");
-    multicall = await multicallArtifact.deploy(core.address, weth.address, donut.address);
+    multicall = await multicallArtifact.deploy(core.address, usdc.address, donut.address);
 
     // Give everyone tokens
     for (const user of [launcher, attacker, user1, user2, user3, user4, user5]) {
       await donut.connect(user).deposit({ value: convert("1000", 18) });
-      await weth.connect(user).deposit({ value: convert("1000", 18) });
+      await usdc.mint(user.address, convert("1000", 6));
     }
 
     const launchParams = {
@@ -82,12 +94,12 @@ describe("EXTREME Stress Tests", function () {
       initialUps: convert("10", 18),
       tailUps: convert("0.1", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(launcher).approve(core.address, launchParams.donutAmount);
@@ -131,11 +143,11 @@ describe("EXTREME Stress Tests", function () {
       for (let i = 0; i < 10; i++) {
         const tokenId = startId + i;
         const collector = users[i % users.length];
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         const price = await content.getPrice(tokenId);
 
         if (price.gt(0)) {
-          await weth.connect(collector).approve(content.address, price);
+          await usdc.connect(collector).approve(content.address, price);
           await content.connect(collector).collect(
             collector.address,
             tokenId,
@@ -161,7 +173,7 @@ describe("EXTREME Stress Tests", function () {
       const price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -171,7 +183,7 @@ describe("EXTREME Stress Tests", function () {
       );
 
       // After free collection, new price should be minInitPrice
-      const newAuction = await content.getAuction(tokenId);
+      const newAuction = await getAuctionData(content, tokenId);
       const minInitPrice = await content.minInitPrice();
       expect(newAuction.initPrice).to.equal(minInitPrice);
     });
@@ -182,12 +194,12 @@ describe("EXTREME Stress Tests", function () {
 
       // Collect multiple times to increase price
       for (let i = 0; i < 5; i++) {
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         const price = await content.getPrice(tokenId);
 
         if (price.gt(0)) {
           const collector = i % 2 === 0 ? user2 : user3;
-          await weth.connect(collector).approve(content.address, price);
+          await usdc.connect(collector).approve(content.address, price);
           await content.connect(collector).collect(
             collector.address,
             tokenId,
@@ -198,7 +210,7 @@ describe("EXTREME Stress Tests", function () {
         }
       }
 
-      const finalAuction = await content.getAuction(tokenId);
+      const finalAuction = await getAuctionData(content, tokenId);
       expect(finalAuction.initPrice).to.be.gt(0);
       console.log(`Final init price after 5 collections: ${divDec(finalAuction.initPrice)}`);
     });
@@ -207,7 +219,7 @@ describe("EXTREME Stress Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://boundary-test");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
 
       // Move to exactly EPOCH_PERIOD seconds
       const EPOCH_PERIOD = 30 * DAY;
@@ -242,11 +254,11 @@ describe("EXTREME Stress Tests", function () {
         await content.connect(users[i]).create(users[i].address, `ipfs://reward-test-${i}`);
         const tokenId = await content.nextTokenId();
 
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         const price = await content.getPrice(tokenId);
 
         if (price.gt(0)) {
-          await weth.connect(users[(i + 1) % 4]).approve(content.address, price);
+          await usdc.connect(users[(i + 1) % 4]).approve(content.address, price);
           await content.connect(users[(i + 1) % 4]).collect(
             users[(i + 1) % 4].address,
             tokenId,
@@ -276,10 +288,10 @@ describe("EXTREME Stress Tests", function () {
       const tokenId = await content.nextTokenId();
 
       // First collection
-      let auctionData = await content.getAuction(tokenId);
+      let auctionData = await getAuctionData(content, tokenId);
       let price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -292,10 +304,10 @@ describe("EXTREME Stress Tests", function () {
       expect(user2BalanceAfterFirst).to.be.gte(price);
 
       // Second collection by different user
-      auctionData = await content.getAuction(tokenId);
+      auctionData = await getAuctionData(content, tokenId);
       price = await content.getPrice(tokenId);
 
-      await weth.connect(user3).approve(content.address, price);
+      await usdc.connect(user3).approve(content.address, price);
       await content.connect(user3).collect(
         user3.address,
         tokenId,
@@ -369,21 +381,21 @@ describe("EXTREME Stress Tests", function () {
       const price = await auction.getPrice();
       expect(price).to.equal(0);
 
-      // Send some WETH to auction
-      await weth.connect(user1).transfer(auction.address, convert("1", 18));
+      // Send some USDC to auction
+      await usdc.connect(user1).transfer(auction.address, convert("1", 6));
 
       const epochId = await auction.epochId();
 
       // Should be able to buy for free
       await auction.connect(user2).buy(
-        [weth.address],
+        [usdc.address],
         user2.address,
         epochId,
         ethers.constants.MaxUint256,
         0
       );
 
-      // User2 should have received the WETH
+      // User2 should have received the USDC
       // New epoch should have started
       const newEpochId = await auction.epochId();
       expect(newEpochId).to.equal(epochId.add(1));
@@ -395,8 +407,8 @@ describe("EXTREME Stress Tests", function () {
       await mockToken.connect(user1).deposit({ value: convert("10", 18) });
       await mockToken.connect(user1).transfer(auction.address, convert("10", 18));
 
-      // Also send some WETH
-      await weth.connect(user1).transfer(auction.address, convert("5", 18));
+      // Also send some USDC
+      await usdc.connect(user1).transfer(auction.address, convert("5", 6));
 
       // Wait for price to be 0
       const epochPeriod = await auction.epochPeriod();
@@ -405,21 +417,21 @@ describe("EXTREME Stress Tests", function () {
 
       const epochId = await auction.epochId();
 
-      const user3WethBefore = await weth.balanceOf(user3.address);
+      const user3UsdcBefore = await usdc.balanceOf(user3.address);
       const user3MockBefore = await mockToken.balanceOf(user3.address);
 
       await auction.connect(user3).buy(
-        [weth.address, mockToken.address],
+        [usdc.address, mockToken.address],
         user3.address,
         epochId,
         ethers.constants.MaxUint256,
         0
       );
 
-      const user3WethAfter = await weth.balanceOf(user3.address);
+      const user3UsdcAfter = await usdc.balanceOf(user3.address);
       const user3MockAfter = await mockToken.balanceOf(user3.address);
 
-      expect(user3WethAfter).to.be.gt(user3WethBefore);
+      expect(user3UsdcAfter).to.be.gt(user3UsdcBefore);
       expect(user3MockAfter).to.be.gt(user3MockBefore);
     });
   });
@@ -470,7 +482,7 @@ describe("EXTREME Stress Tests", function () {
       await ethers.provider.send("evm_increaseTime", [DAY * 15]); // Half decay
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const maxPrice = await content.getPrice(tokenId);
 
       if (maxPrice.gt(0)) {
@@ -484,12 +496,12 @@ describe("EXTREME Stress Tests", function () {
         expect(prevOwner).to.equal(user4.address);
         expect(creator).to.equal(user4.address);
 
-        const prevOwnerBefore = await weth.balanceOf(prevOwner);
-        const treasuryBefore = await weth.balanceOf(treasury);
-        const teamBefore = await weth.balanceOf(team);
-        const protocolBefore = await weth.balanceOf(protocolFee);
+        const prevOwnerBefore = await usdc.balanceOf(prevOwner);
+        const treasuryBefore = await usdc.balanceOf(treasury);
+        const teamBefore = await usdc.balanceOf(team);
+        const protocolBefore = await usdc.balanceOf(protocolFee);
 
-        await weth.connect(user2).approve(content.address, maxPrice);
+        await usdc.connect(user2).approve(content.address, maxPrice);
         await content.connect(user2).collect(
           user2.address,
           tokenId,
@@ -501,12 +513,12 @@ describe("EXTREME Stress Tests", function () {
         // Get actual price paid from stake
         const actualPrice = await content.id_Stake(tokenId);
 
-        const prevOwnerAfter = await weth.balanceOf(prevOwner);
-        const treasuryAfter = await weth.balanceOf(treasury);
-        const teamAfter = await weth.balanceOf(team);
-        const protocolAfter = await weth.balanceOf(protocolFee);
+        const prevOwnerAfter = await usdc.balanceOf(prevOwner);
+        const treasuryAfter = await usdc.balanceOf(treasury);
+        const teamAfter = await usdc.balanceOf(team);
+        const protocolAfter = await usdc.balanceOf(protocolFee);
 
-        // prevOwner gets 80% + 2% (since prevOwner == creator in this case)
+        // prevOwner gets 80% + 3% (since prevOwner == creator in this case)
         const prevOwnerFee = prevOwnerAfter.sub(prevOwnerBefore);
         const treasuryFee = treasuryAfter.sub(treasuryBefore);
         const teamFee = teamAfter.sub(teamBefore);
@@ -516,11 +528,11 @@ describe("EXTREME Stress Tests", function () {
         const totalFees = prevOwnerFee.add(treasuryFee).add(teamFee).add(protocolFeeAmt);
         expect(totalFees).to.equal(actualPrice);
 
-        console.log(`Actual Price: ${divDec(actualPrice)}`);
-        console.log(`PrevOwner+Creator (82%): ${divDec(prevOwnerFee)}`);
-        console.log(`Treasury (15%): ${divDec(treasuryFee)}`);
-        console.log(`Team (2%): ${divDec(teamFee)}`);
-        console.log(`Protocol (1%): ${divDec(protocolFeeAmt)}`);
+        console.log(`Actual Price: ${divDec6(actualPrice)}`);
+        console.log(`PrevOwner+Creator (83%): ${divDec6(prevOwnerFee)}`);
+        console.log(`Treasury (15%): ${divDec6(treasuryFee)}`);
+        console.log(`Team (1%): ${divDec6(teamFee)}`);
+        console.log(`Protocol (1%): ${divDec6(protocolFeeAmt)}`);
       }
     });
 
@@ -532,11 +544,11 @@ describe("EXTREME Stress Tests", function () {
       await ethers.provider.send("evm_increaseTime", [DAY * 29]);
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      if (price.gt(0) && price.lt(convert("0.0001", 18))) {
-        await weth.connect(user2).approve(content.address, price);
+      if (price.gt(0) && price.lt(convert("0.0001", 6))) {
+        await usdc.connect(user2).approve(content.address, price);
         await content.connect(user2).collect(
           user2.address,
           tokenId,
@@ -544,7 +556,7 @@ describe("EXTREME Stress Tests", function () {
           ethers.constants.MaxUint256,
           price
         );
-        console.log(`Successfully collected with tiny price: ${divDec(price)}`);
+        console.log(`Successfully collected with tiny price: ${divDec6(price)}`);
       }
     });
   });
@@ -575,11 +587,11 @@ describe("EXTREME Stress Tests", function () {
 
       for (let i = 0; i < 5; i++) {
         const tokenId = tokenIds[i];
-        const auctionData = await content.getAuction(tokenId);
+        const auctionData = await getAuctionData(content, tokenId);
         const price = await content.getPrice(tokenId);
 
         if (price.gt(0)) {
-          await weth.connect(users[i]).approve(content.address, price);
+          await usdc.connect(users[i]).approve(content.address, price);
           promises.push(
             content.connect(users[i]).collect(
               users[i].address,
@@ -602,13 +614,13 @@ describe("EXTREME Stress Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://state-recovery");
       const tokenId = await content.nextTokenId();
 
-      const auctionBefore = await content.getAuction(tokenId);
+      const auctionBefore = await getAuctionData(content, tokenId);
       const ownerBefore = await content.ownerOf(tokenId);
       const stakeBefore = await content.id_Stake(tokenId);
 
       // Try to collect with wrong epochId (should fail)
       const price = await content.getPrice(tokenId);
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
 
       await expect(
         content.connect(user2).collect(
@@ -621,7 +633,7 @@ describe("EXTREME Stress Tests", function () {
       ).to.be.reverted;
 
       // State should be unchanged
-      const auctionAfter = await content.getAuction(tokenId);
+      const auctionAfter = await getAuctionData(content, tokenId);
       const ownerAfter = await content.ownerOf(tokenId);
       const stakeAfter = await content.id_Stake(tokenId);
 
@@ -650,10 +662,10 @@ describe("EXTREME Stress Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://gas-collection-test");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       const tx = await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -671,7 +683,7 @@ describe("EXTREME Stress Tests", function () {
 
 describe("EXTREME Attack Vector Tests", function () {
   let owner, protocol, launcher, attacker, user1, user2, user3, user4, user5;
-  let weth, donut, core, multicall;
+  let usdc, donut, core, multicall;
   let content, minter, rewarder, auction, unit, lpToken;
 
   const WEEK = 7 * 24 * 60 * 60;
@@ -681,9 +693,12 @@ describe("EXTREME Attack Vector Tests", function () {
     await network.provider.send("hardhat_reset");
     [owner, protocol, launcher, attacker, user1, user2, user3, user4, user5] = await ethers.getSigners();
 
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
     const uniswapFactory = await mockUniswapFactoryArtifact.deploy();
@@ -698,7 +713,7 @@ describe("EXTREME Attack Vector Tests", function () {
     const auctionFactory = await (await ethers.getContractFactory("AuctionFactory")).deploy();
 
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -713,7 +728,7 @@ describe("EXTREME Attack Vector Tests", function () {
 
     for (const user of [launcher, attacker, user1, user2, user3, user4, user5]) {
       await donut.connect(user).deposit({ value: convert("10000", 18) });
-      await weth.connect(user).deposit({ value: convert("10000", 18) });
+      await usdc.mint(user.address, convert("10000", 6));
     }
 
     await donut.connect(launcher).approve(core.address, convert("1000", 18));
@@ -727,12 +742,12 @@ describe("EXTREME Attack Vector Tests", function () {
       initialUps: convert("10", 18),
       tailUps: convert("0.1", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     });
 
     const receipt = await tx.wait();
@@ -748,7 +763,7 @@ describe("EXTREME Attack Vector Tests", function () {
     it("Should resist reentrancy via malicious ERC20", async function () {
       // The contract uses SafeERC20 and nonReentrant, so this is just verification
       // A real reentrancy attack would require deploying a malicious token
-      // which the content engine doesn't allow (uses predefined WETH)
+      // which the content engine doesn't allow (uses predefined USDC)
       expect(true).to.be.true;
     });
   });
@@ -757,7 +772,7 @@ describe("EXTREME Attack Vector Tests", function () {
     it("Should handle block timestamp at uint256 max safely", async function () {
       // This is theoretical - we can't actually set timestamp to max
       // But we verify the math doesn't overflow
-      const initPrice = convert("1", 18);
+      const initPrice = convert("1000", 6);
       const timePassed = ethers.BigNumber.from(30 * DAY);
       const epochPeriod = ethers.BigNumber.from(30 * DAY);
 
@@ -774,14 +789,14 @@ describe("EXTREME Attack Vector Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://frontrun-resist");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       // Legitimate user prepares transaction
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
 
       // Attacker tries to front-run with same epochId
-      await weth.connect(attacker).approve(content.address, price);
+      await usdc.connect(attacker).approve(content.address, price);
 
       // First transaction succeeds
       await content.connect(user2).collect(
@@ -808,11 +823,11 @@ describe("EXTREME Attack Vector Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://sandwich-resist");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       // User sets maxPrice to current price
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
 
       // If attacker manipulated price higher, user's tx would fail
       // Since we can't actually manipulate price externally, we verify the check exists
@@ -875,7 +890,7 @@ describe("EXTREME Attack Vector Tests", function () {
       const price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -893,7 +908,7 @@ describe("EXTREME Attack Vector Tests", function () {
 
 describe("EXTREME Integration Tests", function () {
   let owner, protocol, launcher, attacker, user1, user2, user3, user4, user5;
-  let weth, donut, core, multicall;
+  let usdc, donut, core, multicall;
   let content, minter, rewarder, auction, unit, lpToken;
 
   const WEEK = 7 * 24 * 60 * 60;
@@ -903,9 +918,12 @@ describe("EXTREME Integration Tests", function () {
     await network.provider.send("hardhat_reset");
     [owner, protocol, launcher, attacker, user1, user2, user3, user4, user5] = await ethers.getSigners();
 
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
     const uniswapFactory = await mockUniswapFactoryArtifact.deploy();
@@ -920,7 +938,7 @@ describe("EXTREME Integration Tests", function () {
     const auctionFactory = await (await ethers.getContractFactory("AuctionFactory")).deploy();
 
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -935,7 +953,7 @@ describe("EXTREME Integration Tests", function () {
 
     for (const user of [launcher, attacker, user1, user2, user3, user4, user5]) {
       await donut.connect(user).deposit({ value: convert("10000", 18) });
-      await weth.connect(user).deposit({ value: convert("10000", 18) });
+      await usdc.mint(user.address, convert("10000", 6));
     }
 
     await donut.connect(launcher).approve(core.address, convert("1000", 18));
@@ -949,12 +967,12 @@ describe("EXTREME Integration Tests", function () {
       initialUps: convert("10", 18),
       tailUps: convert("0.1", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     });
 
     const receipt = await tx.wait();
@@ -974,9 +992,9 @@ describe("EXTREME Integration Tests", function () {
       console.log(`1. Created token ${tokenId}`);
 
       // 2. First collection
-      let auctionData = await content.getAuction(tokenId);
+      let auctionData = await getAuctionData(content, tokenId);
       let price = await content.getPrice(tokenId);
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -984,12 +1002,12 @@ describe("EXTREME Integration Tests", function () {
         ethers.constants.MaxUint256,
         price
       );
-      console.log(`2. First collection at price ${divDec(price)}`);
+      console.log(`2. First collection at price ${divDec6(price)}`);
 
       // 3. Second collection (price should be 2x)
-      auctionData = await content.getAuction(tokenId);
+      auctionData = await getAuctionData(content, tokenId);
       price = await content.getPrice(tokenId);
-      await weth.connect(user3).approve(content.address, price);
+      await usdc.connect(user3).approve(content.address, price);
       await content.connect(user3).collect(
         user3.address,
         tokenId,
@@ -997,7 +1015,7 @@ describe("EXTREME Integration Tests", function () {
         ethers.constants.MaxUint256,
         price
       );
-      console.log(`3. Second collection at price ${divDec(price)}`);
+      console.log(`3. Second collection at price ${divDec6(price)}`);
 
       // 4. Trigger minter emission
       await ethers.provider.send("evm_increaseTime", [WEEK]);
@@ -1018,7 +1036,7 @@ describe("EXTREME Integration Tests", function () {
       await ethers.provider.send("evm_increaseTime", [31 * DAY]);
       await ethers.provider.send("evm_mine");
 
-      auctionData = await content.getAuction(tokenId);
+      auctionData = await getAuctionData(content, tokenId);
       price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
 
@@ -1038,8 +1056,8 @@ describe("EXTREME Integration Tests", function () {
 
     it("Should handle auction lifecycle", async function () {
       // 1. Send assets to auction
-      await weth.connect(user1).transfer(auction.address, convert("10", 18));
-      console.log("1. Sent 10 WETH to auction");
+      await usdc.connect(user1).transfer(auction.address, convert("10", 6));
+      console.log("1. Sent 10 USDC to auction");
 
       // 2. Wait for price to decay
       const epochPeriod = await auction.epochPeriod();
@@ -1048,19 +1066,19 @@ describe("EXTREME Integration Tests", function () {
 
       // 3. Buy at 0 price
       const epochId = await auction.epochId();
-      const user5WethBefore = await weth.balanceOf(user5.address);
+      const user5UsdcBefore = await usdc.balanceOf(user5.address);
 
       await auction.connect(user5).buy(
-        [weth.address],
+        [usdc.address],
         user5.address,
         epochId,
         ethers.constants.MaxUint256,
         0
       );
 
-      const user5WethAfter = await weth.balanceOf(user5.address);
-      expect(user5WethAfter).to.be.gt(user5WethBefore);
-      console.log(`2. Bought auction assets, gained ${divDec(user5WethAfter.sub(user5WethBefore))} WETH`);
+      const user5UsdcAfter = await usdc.balanceOf(user5.address);
+      expect(user5UsdcAfter).to.be.gt(user5UsdcBefore);
+      console.log(`2. Bought auction assets, gained ${divDec6(user5UsdcAfter.sub(user5UsdcBefore))} USDC`);
 
       // 4. New epoch should have started
       const newEpochId = await auction.epochId();
@@ -1082,12 +1100,12 @@ describe("EXTREME Integration Tests", function () {
         initialUps: convert("5", 18),
         tailUps: convert("0.05", 18),
         halvingPeriod: WEEK * 2,
-        contentMinInitPrice: convert("0.01", 18),
+        contentMinInitPrice: convert("100", 6),
         contentIsModerated: true,
-        auctionInitPrice: convert("2", 18),
+        auctionInitPrice: convert("2000", 6),
         auctionEpochPeriod: DAY * 2,
         auctionPriceMultiplier: convert("2", 18),
-        auctionMinInitPrice: convert("0.01", 18),
+        auctionMinInitPrice: convert("10", 6),
       };
 
       await donut.connect(user1).approve(core.address, launchParams2.donutAmount);
@@ -1107,21 +1125,21 @@ describe("EXTREME Integration Tests", function () {
       const tokenId = await content2.nextTokenId();
 
       // Should not be collectable without approval
-      const auctionData = await content2.getAuction(tokenId);
+      const auctionData = await getAuctionData(content2, tokenId);
       await expect(
         content2.connect(user3).collect(
           user3.address,
           tokenId,
           auctionData.epochId,
           ethers.constants.MaxUint256,
-          convert("1", 18)
+          convert("1", 6)
         )
       ).to.be.revertedWith("Content__NotApproved()");
 
       // Approve and collect
       await content2.connect(user1).approveContents([tokenId]);
       const price = await content2.getPrice(tokenId);
-      await weth.connect(user3).approve(content2.address, price);
+      await usdc.connect(user3).approve(content2.address, price);
       await content2.connect(user3).collect(
         user3.address,
         tokenId,

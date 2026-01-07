@@ -17,7 +17,7 @@ import {ICore} from "./interfaces/ICore.sol";
  * @notice NFT collection where collectors can "steal" content by paying a dutch auction price.
  *         The purchase price determines the owner's stake in the Rewarder, earning them Unit rewards.
  * @dev Each content has a dutch auction that resets after collection with a 2x price multiplier.
- *      Fees: 80% to previous owner, 15% to treasury, 2% to creator, 2% to team, 1% to protocol.
+ *      Fees: 80% to previous owner, 15% to treasury, 3% to creator, 1% to team, 1% to protocol.
  */
 contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
@@ -25,9 +25,8 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     /*----------  CONSTANTS  --------------------------------------------*/
 
     uint256 public constant PREVIOUS_OWNER_FEE = 8_000; // 80% to previous owner
-    uint256 public constant TREASURY_FEE = 1_500; // 15% to treasury (auction)
-    uint256 public constant CREATOR_FEE = 200; // 2% to creator
-    uint256 public constant TEAM_FEE = 200; // 2% to team
+    uint256 public constant CREATOR_FEE = 300; // 3% to creator
+    uint256 public constant TEAM_FEE = 100; // 1% to team
     uint256 public constant PROTOCOL_FEE = 100; // 1% to protocol
     uint256 public constant DIVISOR = 10_000;
     uint256 public constant PRECISION = 1e18;
@@ -54,18 +53,12 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
 
     uint256 public nextTokenId;
 
-    mapping(uint256 => uint256) public id_Stake;
-    mapping(uint256 => address) public id_Creator;
     mapping(uint256 => bool) public id_IsApproved;
-    mapping(uint256 => Auction) public id_Auction;
-
-    /*----------  STRUCTS  ----------------------------------------------*/
-
-    struct Auction {
-        uint256 epochId;
-        uint256 initPrice;
-        uint256 startTime;
-    }
+    mapping(uint256 => address) public id_Creator;
+    mapping(uint256 => uint256) public id_EpochId;
+    mapping(uint256 => uint256) public id_InitPrice;
+    mapping(uint256 => uint256) public id_StartTime;
+    mapping(uint256 => uint256) public id_Stake;
 
     /*----------  ERRORS  -----------------------------------------------*/
 
@@ -80,7 +73,6 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     error Content__AlreadyApproved();
     error Content__NotModerator();
     error Content__InvalidTreasury();
-    error Content__InvalidTeam();
     error Content__InvalidCore();
     error Content__InvalidUnit();
     error Content__InvalidQuote();
@@ -95,7 +87,6 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         uint256 epochId,
         uint256 price
     );
-    event Content__Distributed(uint256 quoteAmount, uint256 unitAmount);
     event Content__UriSet(string uri);
     event Content__TreasurySet(address indexed treasury);
     event Content__TeamSet(address indexed team);
@@ -138,7 +129,6 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         if (_unit == address(0)) revert Content__InvalidUnit();
         if (_quote == address(0)) revert Content__InvalidQuote();
         if (_treasury == address(0)) revert Content__InvalidTreasury();
-        if (_team == address(0)) revert Content__InvalidTeam();
         if (_core == address(0)) revert Content__InvalidCore();
 
         uri = _uri;
@@ -151,7 +141,6 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         isModerated = _isModerated;
 
         rewarder = IRewarderFactory(_rewarderFactory).deploy(address(this));
-        IRewarder(rewarder).addReward(_quote);
         IRewarder(rewarder).addReward(_unit);
     }
 
@@ -171,11 +160,8 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         id_Creator[tokenId] = to;
         if (!isModerated) id_IsApproved[tokenId] = true;
 
-        id_Auction[tokenId] = Auction({
-            epochId: 0,
-            initPrice: minInitPrice,
-            startTime: block.timestamp
-        });
+        id_InitPrice[tokenId] = minInitPrice;
+        id_StartTime[tokenId] = block.timestamp;
 
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, tokenUri);
@@ -202,11 +188,9 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         if (to == address(0)) revert Content__ZeroTo();
         if (!id_IsApproved[tokenId]) revert Content__NotApproved();
         if (block.timestamp > deadline) revert Content__Expired();
+        if (epochId != id_EpochId[tokenId]) revert Content__EpochIdMismatch();
 
-        Auction memory auction = id_Auction[tokenId];
-        if (epochId != auction.epochId) revert Content__EpochIdMismatch();
-
-        price = getPriceFromCache(auction);
+        price = getPrice(tokenId);
         if (price > maxPrice) revert Content__MaxPriceExceeded();
 
         address creator = id_Creator[tokenId];
@@ -223,12 +207,10 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
 
         // Update auction state
         unchecked {
-            auction.epochId++;
+            id_EpochId[tokenId]++;
         }
-        auction.initPrice = newInitPrice;
-        auction.startTime = block.timestamp;
-
-        id_Auction[tokenId] = auction;
+        id_InitPrice[tokenId] = newInitPrice;
+        id_StartTime[tokenId] = block.timestamp;
         id_Stake[tokenId] = price;
 
         // Transfer NFT
@@ -239,21 +221,23 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
             IERC20(quote).safeTransferFrom(msg.sender, address(this), price);
 
             // Calculate fees
-            address protocolFeeAddr = ICore(core).protocolFeeAddress();
+            address protocol = ICore(core).protocolFeeAddress();
             uint256 prevOwnerAmount = price * PREVIOUS_OWNER_FEE / DIVISOR;
             uint256 creatorAmount = price * CREATOR_FEE / DIVISOR;
-            uint256 teamAmount = price * TEAM_FEE / DIVISOR;
-            uint256 protocolAmount = protocolFeeAddr != address(0) ? price * PROTOCOL_FEE / DIVISOR : 0;
-            uint256 treasuryAmount = price - prevOwnerAmount - creatorAmount - teamAmount - protocolAmount;
+            uint256 teamAmount = team != address(0) ? price * TEAM_FEE / DIVISOR : 0;
+            uint256 protocolAmount = protocol != address(0) ? price * PROTOCOL_FEE / DIVISOR : 0;
+            uint256 treasuryAmount = price - prevOwnerAmount - creatorAmount - teamAmount - protocolAmount; // remainder collects dust
 
             // Distribute fees
             IERC20(quote).safeTransfer(prevOwner, prevOwnerAmount);
             IERC20(quote).safeTransfer(creator, creatorAmount);
-            IERC20(quote).safeTransfer(team, teamAmount);
             IERC20(quote).safeTransfer(treasury, treasuryAmount);
 
+            if (teamAmount > 0) {
+                IERC20(quote).safeTransfer(team, teamAmount);
+            }
             if (protocolAmount > 0) {
-                IERC20(quote).safeTransfer(protocolFeeAddr, protocolAmount);
+                IERC20(quote).safeTransfer(protocol, protocolAmount);
             }
 
             // Update stake in rewarder
@@ -268,38 +252,6 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
         emit Content__Collected(msg.sender, to, tokenId, epochId, price);
 
         return price;
-    }
-
-    /**
-     * @notice Distribute any accumulated tokens to the rewarder.
-     * @dev Can be called by anyone to distribute accumulated rewards.
-     */
-    function distribute() external {
-        uint256 duration = IRewarder(rewarder).DURATION();
-
-        uint256 quoteDistributed = 0;
-        uint256 balanceQuote = IERC20(quote).balanceOf(address(this));
-        uint256 leftQuote = IRewarder(rewarder).left(quote);
-        if (balanceQuote > leftQuote && balanceQuote > duration) {
-            IERC20(quote).safeApprove(rewarder, 0);
-            IERC20(quote).safeApprove(rewarder, balanceQuote);
-            IRewarder(rewarder).notifyRewardAmount(quote, balanceQuote);
-            quoteDistributed = balanceQuote;
-        }
-
-        uint256 unitDistributed = 0;
-        uint256 balanceUnit = IERC20(unit).balanceOf(address(this));
-        uint256 leftUnit = IRewarder(rewarder).left(unit);
-        if (balanceUnit > leftUnit && balanceUnit > duration) {
-            IERC20(unit).safeApprove(rewarder, 0);
-            IERC20(unit).safeApprove(rewarder, balanceUnit);
-            IRewarder(rewarder).notifyRewardAmount(unit, balanceUnit);
-            unitDistributed = balanceUnit;
-        }
-
-        if (quoteDistributed > 0 || unitDistributed > 0) {
-            emit Content__Distributed(quoteDistributed, unitDistributed);
-        }
     }
 
     /*----------  DISABLED TRANSFERS  -----------------------------------*/
@@ -346,11 +298,10 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     }
 
     /**
-     * @notice Update the team address.
+     * @notice Update the team address. Set to address(0) to disable team fee.
      * @param _team New team address
      */
     function setTeam(address _team) external onlyOwner {
-        if (_team == address(0)) revert Content__InvalidTeam();
         team = _team;
         emit Content__TeamSet(_team);
     }
@@ -435,31 +386,14 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     /*----------  VIEW FUNCTIONS  ---------------------------------------*/
 
     /**
-     * @notice Get the current price for a token from cached auction data.
-     * @param auction Auction struct
-     * @return Current dutch auction price
-     */
-    function getPriceFromCache(Auction memory auction) public view returns (uint256) {
-        uint256 timePassed = block.timestamp - auction.startTime;
-        if (timePassed > EPOCH_PERIOD) return 0;
-        return auction.initPrice - auction.initPrice * timePassed / EPOCH_PERIOD;
-    }
-
-    /**
-     * @notice Get the auction data for a token.
-     * @param tokenId Token ID
-     * @return Auction struct
-     */
-    function getAuction(uint256 tokenId) external view returns (Auction memory) {
-        return id_Auction[tokenId];
-    }
-
-    /**
      * @notice Get the current price for a token.
      * @param tokenId Token ID
      * @return Current dutch auction price
      */
-    function getPrice(uint256 tokenId) external view returns (uint256) {
-        return getPriceFromCache(id_Auction[tokenId]);
+    function getPrice(uint256 tokenId) public view returns (uint256) {
+        uint256 timePassed = block.timestamp - id_StartTime[tokenId];
+        if (timePassed > EPOCH_PERIOD) return 0;
+        uint256 initPrice = id_InitPrice[tokenId];
+        return initPrice - initPrice * timePassed / EPOCH_PERIOD;
     }
 }

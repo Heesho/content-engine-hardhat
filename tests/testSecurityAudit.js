@@ -1,13 +1,22 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 let owner, protocol, launcher, attacker, user1, user2;
-let weth, donut, core, multicall;
+let usdc, donut, core, multicall;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -22,12 +31,13 @@ describe("Security Audit Tests", function () {
 
     [owner, protocol, launcher, attacker, user1, user2] = await ethers.getSigners();
 
-    // Deploy WETH
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
 
     // Deploy mock DONUT token
-    donut = await wethArtifact.deploy();
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     // Deploy mock Uniswap V2 Factory and Router
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
@@ -55,7 +65,7 @@ describe("Security Audit Tests", function () {
     // Deploy Core
     const coreArtifact = await ethers.getContractFactory("Core");
     core = await coreArtifact.deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -70,7 +80,7 @@ describe("Security Audit Tests", function () {
 
     // Deploy Multicall
     const multicallArtifact = await ethers.getContractFactory("Multicall");
-    multicall = await multicallArtifact.deploy(core.address, weth.address, donut.address);
+    multicall = await multicallArtifact.deploy(core.address, usdc.address, donut.address);
 
     // Mint DONUT to launcher and launch a content engine
     await donut.connect(launcher).deposit({ value: convert("10000", 18) });
@@ -85,12 +95,12 @@ describe("Security Audit Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(launcher).approve(core.address, launchParams.donutAmount);
@@ -116,10 +126,10 @@ describe("Security Audit Tests", function () {
       const tokenId = await content.nextTokenId();
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user1).deposit({ value: price.mul(2) });
-      await weth.connect(user1).approve(content.address, price.mul(2));
+      await usdc.mint(user1.address, price.mul(2));
+      await usdc.connect(user1).approve(content.address, price.mul(2));
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
 
       // Normal collection should work
       await content.connect(user1).collect(
@@ -135,9 +145,9 @@ describe("Security Audit Tests", function () {
     });
 
     it("Auction.buy() is protected against reentrancy", async function () {
-      // Send some WETH to auction for testing
-      await weth.connect(user1).deposit({ value: convert("1", 18) });
-      await weth.connect(user1).transfer(auction.address, convert("1", 18));
+      // Send some USDC to auction for testing
+      await usdc.mint(user1.address, convert("1", 6));
+      await usdc.connect(user1).transfer(auction.address, convert("1", 6));
 
       // Auction buy should work normally with nonReentrant
       const price = await auction.getPrice();
@@ -175,7 +185,7 @@ describe("Security Audit Tests", function () {
 
     it("Rewarder.addReward() only callable by Content", async function () {
       await expect(
-        rewarder.connect(attacker).addReward(weth.address)
+        rewarder.connect(attacker).addReward(usdc.address)
       ).to.be.reverted;
     });
 
@@ -193,7 +203,7 @@ describe("Security Audit Tests", function () {
       ).to.be.revertedWith("Ownable: caller is not the owner");
 
       await expect(
-        content.connect(attacker).addReward(weth.address)
+        content.connect(attacker).addReward(usdc.address)
       ).to.be.revertedWith("Ownable: caller is not the owner");
     });
 
@@ -213,12 +223,12 @@ describe("Security Audit Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://frontrun-epoch");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       // Attacker tries with wrong epochId
-      await weth.connect(attacker).deposit({ value: price.mul(2) });
-      await weth.connect(attacker).approve(content.address, price.mul(2));
+      await usdc.mint(attacker.address, price.mul(2));
+      await usdc.connect(attacker).approve(content.address, price.mul(2));
 
       const wrongEpochId = auctionData.epochId.add(1);
 
@@ -237,7 +247,7 @@ describe("Security Audit Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://frontrun-deadline");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       const block = await ethers.provider.getBlock("latest");
@@ -258,7 +268,7 @@ describe("Security Audit Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://frontrun-maxprice");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
@@ -280,7 +290,7 @@ describe("Security Audit Tests", function () {
 
       await expect(
         auction.connect(attacker).buy(
-          [weth.address],
+          [usdc.address],
           attacker.address,
           wrongEpochId,
           ethers.constants.MaxUint256,
@@ -399,7 +409,7 @@ describe("Security Audit Tests", function () {
 
     it("Content.collect() validates inputs", async function () {
       await expect(
-        content.connect(user1).collect(AddressZero, 1, 0, ethers.constants.MaxUint256, convert("1", 18))
+        content.connect(user1).collect(AddressZero, 1, 0, ethers.constants.MaxUint256, convert("1", 6))
       ).to.be.revertedWith("Content__ZeroTo()");
     });
 
@@ -419,12 +429,12 @@ describe("Security Audit Tests", function () {
           initialUps: convert("1", 18),
           tailUps: convert("0.01", 18),
           halvingPeriod: WEEK,
-          contentMinInitPrice: convert("0.001", 18),
+          contentMinInitPrice: convert("1", 6),
           contentIsModerated: false,
-          auctionInitPrice: convert("1", 18),
+          auctionInitPrice: convert("1000", 6),
           auctionEpochPeriod: DAY,
           auctionPriceMultiplier: convert("1.5", 18),
-          auctionMinInitPrice: convert("0.001", 18),
+          auctionMinInitPrice: convert("1", 6),
         })
       ).to.be.revertedWith("Core__InvalidLauncher()");
 
@@ -440,12 +450,12 @@ describe("Security Audit Tests", function () {
           initialUps: convert("1", 18),
           tailUps: convert("0.01", 18),
           halvingPeriod: WEEK,
-          contentMinInitPrice: convert("0.001", 18),
+          contentMinInitPrice: convert("1", 6),
           contentIsModerated: false,
-          auctionInitPrice: convert("1", 18),
+          auctionInitPrice: convert("1000", 6),
           auctionEpochPeriod: DAY,
           auctionPriceMultiplier: convert("1.5", 18),
-          auctionMinInitPrice: convert("0.001", 18),
+          auctionMinInitPrice: convert("1", 6),
         })
       ).to.be.revertedWith("Core__EmptyTokenName()");
     });
@@ -456,12 +466,12 @@ describe("Security Audit Tests", function () {
       // Below minimum (1 hour)
       await expect(
         auctionFactoryContract.deploy(
-          convert("1", 18),
-          weth.address,
+          convert("1000", 6),
+          usdc.address,
           AddressDead,
           60 * 30, // 30 minutes, below 1 hour minimum
           convert("1.5", 18),
-          convert("0.001", 18)
+          convert("1", 6)
         )
       ).to.be.revertedWith("Auction__EpochPeriodBelowMin()");
     });
@@ -487,12 +497,12 @@ describe("Security Audit Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://stake-test");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
-        await weth.connect(user2).deposit({ value: price.mul(2) });
-        await weth.connect(user2).approve(content.address, price.mul(2));
+        await usdc.mint(user2.address, price.mul(2));
+        await usdc.connect(user2).approve(content.address, price.mul(2));
 
         await content.connect(user2).collect(
           user2.address,
@@ -514,14 +524,14 @@ describe("Security Audit Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://epoch-test");
       const tokenId = await content.nextTokenId();
 
-      const auctionBefore = await content.getAuction(tokenId);
+      const auctionBefore = await getAuctionData(content, tokenId);
       const epochBefore = auctionBefore.epochId;
 
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
-        await weth.connect(user1).deposit({ value: price.mul(2) });
-        await weth.connect(user1).approve(content.address, price.mul(2));
+        await usdc.mint(user1.address, price.mul(2));
+        await usdc.connect(user1).approve(content.address, price.mul(2));
 
         await content.connect(user1).collect(
           user1.address,
@@ -531,7 +541,7 @@ describe("Security Audit Tests", function () {
           price.mul(2)
         );
 
-        const auctionAfter = await content.getAuction(tokenId);
+        const auctionAfter = await getAuctionData(content, tokenId);
         expect(auctionAfter.epochId).to.equal(epochBefore.add(1));
       }
     });
@@ -549,7 +559,7 @@ describe("Security Audit Tests", function () {
       const price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
 
       // Should be able to collect for free
       await content.connect(user2).collect(
@@ -575,12 +585,12 @@ describe("Security Audit Tests", function () {
       expect(prevStake).to.equal(0);
 
       // Collection should work even with 0 previous stake
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
-        await weth.connect(user2).deposit({ value: price.mul(2) });
-        await weth.connect(user2).approve(content.address, price.mul(2));
+        await usdc.mint(user2.address, price.mul(2));
+        await usdc.connect(user2).approve(content.address, price.mul(2));
 
         await content.connect(user2).collect(
           user2.address,

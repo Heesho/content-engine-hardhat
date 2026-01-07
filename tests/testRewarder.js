@@ -1,13 +1,22 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 let owner, protocol, launcher, user1, user2, user3;
-let weth, donut, core, multicall;
+let usdc, donut, core, multicall;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -22,13 +31,14 @@ describe("Rewarder Tests", function () {
 
     [owner, protocol, launcher, user1, user2, user3] = await ethers.getSigners();
 
-    // Deploy WETH
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    console.log("- WETH Initialized");
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+    console.log("- USDC Initialized");
 
     // Deploy mock DONUT token (using MockWETH as it's a mintable ERC20)
-    donut = await wethArtifact.deploy();
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
     console.log("- DONUT Initialized");
 
     // Deploy mock Uniswap V2 Factory and Router
@@ -64,7 +74,7 @@ describe("Rewarder Tests", function () {
     // Deploy Core
     const coreArtifact = await ethers.getContractFactory("Core");
     core = await coreArtifact.deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -80,7 +90,7 @@ describe("Rewarder Tests", function () {
 
     // Deploy Multicall
     const multicallArtifact = await ethers.getContractFactory("Multicall");
-    multicall = await multicallArtifact.deploy(core.address, weth.address, donut.address);
+    multicall = await multicallArtifact.deploy(core.address, usdc.address, donut.address);
     console.log("- Multicall Initialized");
 
     // Mint DONUT to launcher and launch a content engine
@@ -97,12 +107,12 @@ describe("Rewarder Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(launcher).approve(core.address, launchParams.donutAmount);
@@ -134,9 +144,8 @@ describe("Rewarder Tests", function () {
       expect(await rewarder.totalSupply()).to.equal(0);
     });
 
-    it("Should have reward tokens added (unit and weth)", async function () {
-      expect(await rewarder.rewardTokensLength()).to.equal(2);
-      expect(await rewarder.token_IsReward(weth.address)).to.be.true;
+    it("Should have reward token added (unit only)", async function () {
+      expect(await rewarder.rewardTokensLength()).to.equal(1);
       expect(await rewarder.token_IsReward(unit.address)).to.be.true;
     });
   });
@@ -149,14 +158,14 @@ describe("Rewarder Tests", function () {
 
       // Get the current price
       const price = await content.getPrice(tokenId);
-      console.log("Price:", divDec(price));
+      console.log("Price:", divDec6(price));
 
-      // Fund user with WETH and approve
-      await weth.connect(user1).deposit({ value: price });
-      await weth.connect(user1).approve(content.address, price);
+      // Fund user with USDC and approve
+      await usdc.mint(user1.address, price);
+      await usdc.connect(user1).approve(content.address, price);
 
       // Collect
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       await content
         .connect(user1)
         .collect(user1.address, tokenId, auctionData.epochId, ethers.constants.MaxUint256, price);
@@ -172,16 +181,16 @@ describe("Rewarder Tests", function () {
 
       // Get the new price (should be 2x the old price)
       const price = await content.getPrice(tokenId);
-      console.log("New price:", divDec(price));
+      console.log("New price:", divDec6(price));
 
-      // Fund user2 with WETH
-      await weth.connect(user2).deposit({ value: price });
-      await weth.connect(user2).approve(content.address, price);
+      // Fund user2 with USDC
+      await usdc.mint(user2.address, price);
+      await usdc.connect(user2).approve(content.address, price);
 
       const user1BalanceBefore = await rewarder.account_Balance(user1.address);
 
       // User2 collects (steals from user1)
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       await content
         .connect(user2)
         .collect(user2.address, tokenId, auctionData.epochId, ethers.constants.MaxUint256, price);
@@ -210,11 +219,8 @@ describe("Rewarder Tests", function () {
       await ethers.provider.send("evm_increaseTime", [WEEK]);
       await ethers.provider.send("evm_mine");
 
-      // Update minter period
+      // Update minter period (this notifies rewarder directly)
       await minter.updatePeriod();
-
-      // Distribute rewards from content to rewarder
-      await content.distribute();
 
       // Check that there are rewards to claim
       const leftUnit = await rewarder.left(unit.address);
@@ -259,24 +265,23 @@ describe("Rewarder Tests", function () {
       const tokenId3 = await content.nextTokenId();
 
       const price3 = await content.getPrice(tokenId3);
-      await weth.connect(user3).deposit({ value: price3.mul(2) }); // Extra for collect
-      await weth.connect(user3).approve(content.address, price3.mul(2));
+      await usdc.mint(user3.address, price3.mul(2)); // Extra for collect
+      await usdc.connect(user3).approve(content.address, price3.mul(2));
 
-      const auctionData3 = await content.getAuction(tokenId3);
+      const auctionData3 = await getAuctionData(content, tokenId3);
       await content
         .connect(user3)
         .collect(user3.address, tokenId3, auctionData3.epochId, ethers.constants.MaxUint256, price3);
 
       const stake2 = await rewarder.account_Balance(user2.address);
       const stake3 = await rewarder.account_Balance(user3.address);
-      console.log("User2 stake:", divDec(stake2));
-      console.log("User3 stake:", divDec(stake3));
+      console.log("User2 stake:", divDec6(stake2));
+      console.log("User3 stake:", divDec6(stake3));
 
-      // Advance and trigger new emission
+      // Advance and trigger new emission (minter notifies rewarder directly)
       await ethers.provider.send("evm_increaseTime", [WEEK]);
       await ethers.provider.send("evm_mine");
       await minter.updatePeriod();
-      await content.distribute();
 
       // Wait for rewards
       await ethers.provider.send("evm_increaseTime", [DAY]);
@@ -303,8 +308,8 @@ describe("Rewarder Tests", function () {
     });
 
     it("Should revert when adding duplicate reward token", async function () {
-      // Try to add weth again via content owner
-      await expect(content.connect(launcher).addReward(weth.address)).to.be.revertedWith(
+      // Try to add unit again via content owner
+      await expect(content.connect(launcher).addReward(unit.address)).to.be.revertedWith(
         "Rewarder__RewardTokenAlreadyAdded()"
       );
     });
@@ -333,7 +338,7 @@ describe("Rewarder Tests", function () {
     });
 
     it("Should return correct rewardTokensLength", async function () {
-      expect(await rewarder.rewardTokensLength()).to.equal(2);
+      expect(await rewarder.rewardTokensLength()).to.equal(1);
     });
   });
 

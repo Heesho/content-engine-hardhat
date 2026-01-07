@@ -1,14 +1,23 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 describe("Boundary Condition Tests", function () {
   let owner, user1, user2, user3;
-  let weth, donut, core;
+  let usdc, donut, core;
   let content, minter, rewarder, auction, unit;
 
   const WEEK = 7 * 24 * 60 * 60;
@@ -19,9 +28,12 @@ describe("Boundary Condition Tests", function () {
     await network.provider.send("hardhat_reset");
     [owner, user1, user2, user3] = await ethers.getSigners();
 
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
     const uniswapFactory = await mockUniswapFactoryArtifact.deploy();
@@ -36,7 +48,7 @@ describe("Boundary Condition Tests", function () {
     const auctionFactory = await (await ethers.getContractFactory("AuctionFactory")).deploy();
 
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -51,7 +63,7 @@ describe("Boundary Condition Tests", function () {
 
     for (const user of [owner, user1, user2, user3]) {
       await donut.connect(user).deposit({ value: convert("1000", 18) });
-      await weth.connect(user).deposit({ value: convert("1000", 18) });
+      await usdc.mint(user.address, convert("1000", 6));
     }
 
     await donut.connect(owner).approve(core.address, convert("1000", 18));
@@ -65,12 +77,12 @@ describe("Boundary Condition Tests", function () {
       initialUps: convert("1", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.001", 18),
+      contentMinInitPrice: convert("1", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: DAY,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     });
 
     const receipt = await tx.wait();
@@ -88,12 +100,12 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("1", 18),
-            weth.address,
+            convert("1000", 6),
+            usdc.address,
             AddressDead,
             HOUR - 1, // Just below 1 hour
             convert("1.5", 18),
-            convert("0.001", 18)
+            convert("1", 6)
           )
         ).to.be.revertedWith("Auction__EpochPeriodBelowMin()");
       });
@@ -101,12 +113,12 @@ describe("Boundary Condition Tests", function () {
       it("Should accept epoch period at exactly MIN_EPOCH_PERIOD", async function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         const auctionContract = await AuctionFactory.deploy(
-          convert("1", 18),
-          weth.address,
+          convert("1000", 6),
+          usdc.address,
           AddressDead,
           HOUR, // Exactly 1 hour
           convert("1.5", 18),
-          convert("0.001", 18)
+          convert("1", 6)
         );
         expect(await auctionContract.epochPeriod()).to.equal(HOUR);
       });
@@ -115,12 +127,12 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("1", 18),
-            weth.address,
+            convert("1000", 6),
+            usdc.address,
             AddressDead,
             365 * DAY + 1, // Just above 365 days
             convert("1.5", 18),
-            convert("0.001", 18)
+            convert("1", 6)
           )
         ).to.be.revertedWith("Auction__EpochPeriodExceedsMax()");
       });
@@ -128,12 +140,12 @@ describe("Boundary Condition Tests", function () {
       it("Should accept epoch period at exactly MAX_EPOCH_PERIOD", async function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         const auctionContract = await AuctionFactory.deploy(
-          convert("1", 18),
-          weth.address,
+          convert("1000", 6),
+          usdc.address,
           AddressDead,
           365 * DAY, // Exactly 365 days
           convert("1.5", 18),
-          convert("0.001", 18)
+          convert("1", 6)
         );
         expect(await auctionContract.epochPeriod()).to.equal(365 * DAY);
       });
@@ -142,12 +154,12 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("1", 18),
-            weth.address,
+            convert("1000", 6),
+            usdc.address,
             AddressDead,
             DAY,
             convert("1.09", 18), // Below 1.1x
-            convert("0.001", 18)
+            convert("1", 6)
           )
         ).to.be.revertedWith("Auction__PriceMultiplierBelowMin()");
       });
@@ -155,12 +167,12 @@ describe("Boundary Condition Tests", function () {
       it("Should accept price multiplier at exactly MIN_PRICE_MULTIPLIER", async function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         const auctionContract = await AuctionFactory.deploy(
-          convert("1", 18),
-          weth.address,
+          convert("1000", 6),
+          usdc.address,
           AddressDead,
           DAY,
           convert("1.1", 18), // Exactly 1.1x
-          convert("0.001", 18)
+          convert("1", 6)
         );
         expect(await auctionContract.priceMultiplier()).to.equal(convert("1.1", 18));
       });
@@ -169,12 +181,12 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("1", 18),
-            weth.address,
+            convert("1000", 6),
+            usdc.address,
             AddressDead,
             DAY,
             convert("3.01", 18), // Above 3x
-            convert("0.001", 18)
+            convert("1", 6)
           )
         ).to.be.revertedWith("Auction__PriceMultiplierExceedsMax()");
       });
@@ -182,12 +194,12 @@ describe("Boundary Condition Tests", function () {
       it("Should accept price multiplier at exactly MAX_PRICE_MULTIPLIER", async function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         const auctionContract = await AuctionFactory.deploy(
-          convert("1", 18),
-          weth.address,
+          convert("1000", 6),
+          usdc.address,
           AddressDead,
           DAY,
           convert("3", 18), // Exactly 3x
-          convert("0.001", 18)
+          convert("1", 6)
         );
         expect(await auctionContract.priceMultiplier()).to.equal(convert("3", 18));
       });
@@ -196,8 +208,8 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("1", 18),
-            weth.address,
+            convert("1000", 6),
+            usdc.address,
             AddressDead,
             DAY,
             convert("1.5", 18),
@@ -210,7 +222,7 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         const auctionContract = await AuctionFactory.deploy(
           1000000, // initPrice = minInitPrice
-          weth.address,
+          usdc.address,
           AddressDead,
           DAY,
           convert("1.5", 18),
@@ -223,12 +235,12 @@ describe("Boundary Condition Tests", function () {
         const AuctionFactory = await ethers.getContractFactory("Auction");
         await expect(
           AuctionFactory.deploy(
-            convert("0.0001", 18), // initPrice
-            weth.address,
+            convert("0.5", 6), // initPrice = 0.5 USDC
+            usdc.address,
             AddressDead,
             DAY,
             convert("1.5", 18),
-            convert("0.001", 18) // minInitPrice > initPrice
+            convert("1", 6) // minInitPrice = 1 USDC > initPrice
           )
         ).to.be.revertedWith("Auction__InitPriceBelowMin()");
       });
@@ -348,7 +360,7 @@ describe("Boundary Condition Tests", function () {
             "TEST",
             "https://test.com",
             unit.address,
-            weth.address,
+            usdc.address,
             auction.address,
             owner.address, // team
             core.address,
@@ -369,14 +381,14 @@ describe("Boundary Condition Tests", function () {
             "TEST",
             "", // empty URI
             unit.address,
-            weth.address,
+            usdc.address,
             auction.address,
             owner.address, // team
             core.address,
             (await ethers.getContractFactory("RewarderFactory")).attach(
               await core.rewarderFactory()
             ).address,
-            convert("0.001", 18),
+            convert("10", 6),
             false
           )
         ).to.be.revertedWith("Content__ZeroLengthUri()");
@@ -389,7 +401,7 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://time-zero");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       // Price should be exactly initPrice at creation
@@ -403,11 +415,11 @@ describe("Boundary Condition Tests", function () {
       await ethers.provider.send("evm_increaseTime", [1]);
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      // Price should be slightly less than initPrice
-      expect(price).to.be.lt(auctionData.initPrice);
+      // Price should be less than or equal to initPrice (may be equal due to integer truncation with small prices)
+      expect(price).to.be.lte(auctionData.initPrice);
       expect(price).to.be.gt(0);
     });
 
@@ -484,11 +496,11 @@ describe("Boundary Condition Tests", function () {
       await ethers.provider.send("evm_increaseTime", [100]);
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       // Should still work at exact deadline
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       // Note: By the time tx executes, we might be past deadline
       // This test verifies the boundary behavior
     });
@@ -503,10 +515,10 @@ describe("Boundary Condition Tests", function () {
       await ethers.provider.send("evm_increaseTime", [1]);
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await expect(
         content.connect(user2).collect(
           user2.address,
@@ -524,10 +536,10 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://maxprice-equal");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -543,11 +555,11 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://maxprice-exceed");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(1)) {
-        await weth.connect(user2).approve(content.address, price);
+        await usdc.connect(user2).approve(content.address, price);
         // Use a maxPrice that's significantly lower to ensure test works despite block time
         await expect(
           content.connect(user2).collect(
@@ -569,7 +581,7 @@ describe("Boundary Condition Tests", function () {
       await ethers.provider.send("evm_increaseTime", [31 * DAY]);
       await ethers.provider.send("evm_mine");
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
 
@@ -590,10 +602,10 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://epochid-correct");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -607,10 +619,10 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://epochid-plus1");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await expect(
         content.connect(user2).collect(
           user2.address,
@@ -626,11 +638,11 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://epochid-minus1");
       const tokenId = await content.nextTokenId();
 
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
 
       // First collect to increment epochId
       const price = await content.getPrice(tokenId);
-      await weth.connect(user2).approve(content.address, price);
+      await usdc.connect(user2).approve(content.address, price);
       await content.connect(user2).collect(
         user2.address,
         tokenId,
@@ -640,10 +652,10 @@ describe("Boundary Condition Tests", function () {
       );
 
       // Now try with old epochId
-      const newAuction = await content.getAuction(tokenId);
+      const newAuction = await getAuctionData(content, tokenId);
       const newPrice = await content.getPrice(tokenId);
 
-      await weth.connect(user3).approve(content.address, newPrice);
+      await usdc.connect(user3).approve(content.address, newPrice);
       await expect(
         content.connect(user3).collect(
           user3.address,
@@ -669,11 +681,11 @@ describe("Boundary Condition Tests", function () {
       const tokenId = await content.nextTokenId();
 
       // The first collection in a fresh system
-      const auctionData = await content.getAuction(tokenId);
+      const auctionData = await getAuctionData(content, tokenId);
       const price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
-        await weth.connect(user2).approve(content.address, price);
+        await usdc.connect(user2).approve(content.address, price);
         await content.connect(user2).collect(
           user2.address,
           tokenId,
@@ -693,13 +705,13 @@ describe("Boundary Condition Tests", function () {
       const tokenId = await content.nextTokenId();
 
       // First collection
-      let auctionData = await content.getAuction(tokenId);
+      let auctionData = await getAuctionData(content, tokenId);
       let price = await content.getPrice(tokenId);
 
       if (price.gt(0)) {
         const user3BalanceBefore = await rewarder.account_Balance(user3.address);
 
-        await weth.connect(user3).approve(content.address, price);
+        await usdc.connect(user3).approve(content.address, price);
         await content.connect(user3).collect(
           user3.address,
           tokenId,
@@ -712,10 +724,10 @@ describe("Boundary Condition Tests", function () {
         const stakeAdded = user3BalanceAfter.sub(user3BalanceBefore);
 
         // Second collection by someone else should withdraw user3's stake
-        auctionData = await content.getAuction(tokenId);
+        auctionData = await getAuctionData(content, tokenId);
         price = await content.getPrice(tokenId);
 
-        await weth.connect(user1).approve(content.address, price);
+        await usdc.connect(user1).approve(content.address, price);
         await content.connect(user1).collect(
           user1.address,
           tokenId,

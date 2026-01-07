@@ -32,4 +32,5 @@ interface IRewarder {
     function lastTimeRewardApplicable(address token) external view returns (uint256);
     function rewardPerToken(address token) external view returns (uint256);
     function earned(address account, address token) external view returns (uint256);
+    function getRewardForDuration(address token) external view returns (uint256);
 }

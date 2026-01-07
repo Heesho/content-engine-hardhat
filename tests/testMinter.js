@@ -1,12 +1,13 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 
 let owner, protocol, user0, user1, user2, creator1;
-let weth, donut, core;
+let usdc, donut, core;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -20,10 +21,12 @@ describe("Minter Tests", function () {
 
     [owner, protocol, user0, user1, user2, creator1] = await ethers.getSigners();
 
-    // Deploy tokens
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
-    donut = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
+
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     // Deploy mock Uniswap
     uniswapFactory = await (await ethers.getContractFactory("MockUniswapV2Factory")).deploy();
@@ -38,7 +41,7 @@ describe("Minter Tests", function () {
 
     // Deploy Core
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -51,10 +54,10 @@ describe("Minter Tests", function () {
       convert("100", 18)
     );
 
-    // Mint DONUT and WETH
+    // Mint DONUT and USDC
     await donut.connect(user0).deposit({ value: convert("10000", 18) });
-    await weth.connect(user1).deposit({ value: convert("100", 18) });
-    await weth.connect(user2).deposit({ value: convert("100", 18) });
+    await usdc.mint(user1.address, convert("100", 6));
+    await usdc.mint(user2.address, convert("100", 6));
 
     // Launch content engine with 7-day halving
     const launchParams = {
@@ -67,12 +70,12 @@ describe("Minter Tests", function () {
       initialUps: convert("4", 18), // 4 tokens per second
       tailUps: convert("0.5", 18), // 0.5 tokens per second minimum
       halvingPeriod: WEEK, // 7 days
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("100", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -268,7 +271,7 @@ describe("Minter Parameter Validation Tests", function () {
   before("Setup local core", async function () {
     // Deploy fresh Core
     localCore = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -297,12 +300,12 @@ describe("Minter Parameter Validation Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.5", 18),
       halvingPeriod: 86400 * 6, // 6 days - too short
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("100", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(localCore.address, launchParams.donutAmount);
@@ -326,12 +329,12 @@ describe("Minter Parameter Validation Tests", function () {
       initialUps: convert("1", 18),
       tailUps: convert("2", 18), // tail > initial
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("100", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(localCore.address, launchParams.donutAmount);
@@ -355,12 +358,12 @@ describe("Minter Parameter Validation Tests", function () {
       initialUps: 0,
       tailUps: convert("0.5", 18),
       halvingPeriod: WEEK,
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("100", 6),
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(localCore.address, launchParams.donutAmount);

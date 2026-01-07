@@ -49,7 +49,8 @@ contract Rewarder is ReentrancyGuard {
     /*----------  ERRORS  -----------------------------------------------*/
 
     error Rewarder__NotContent();
-    error Rewarder__RewardSmallerThanLeft();
+    error Rewarder__AmountSmallerThanLeft();
+    error Rewarder__AmountSmallerThanDuration();
     error Rewarder__NotRewardToken();
     error Rewarder__RewardTokenAlreadyAdded();
     error Rewarder__ZeroAmount();
@@ -127,8 +128,9 @@ contract Rewarder is ReentrancyGuard {
         updateReward(address(0))
     {
         if (!token_IsReward[token]) revert Rewarder__NotRewardToken();
+        if (amount < DURATION) revert Rewarder__AmountSmallerThanDuration();
         uint256 leftover = left(token);
-        if (amount < leftover) revert Rewarder__RewardSmallerThanLeft();
+        if (amount < leftover) revert Rewarder__AmountSmallerThanLeft();
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -244,5 +246,14 @@ contract Rewarder is ReentrancyGuard {
      */
     function rewardTokensLength() external view returns (uint256) {
         return rewardTokens.length;
+    }
+
+    /**
+     * @notice Get the total rewards to distribute over the DURATION period.
+     * @param token Reward token address
+     * @return Total reward for duration
+     */
+    function getRewardForDuration(address token) external view returns (uint256) {
+        return token_RewardData[token].rewardRate * DURATION / PRECISION;
     }
 }

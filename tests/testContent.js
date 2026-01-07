@@ -1,13 +1,23 @@
 const convert = (amount, decimals) => ethers.utils.parseUnits(amount, decimals);
 const divDec = (amount, decimals = 18) => amount / 10 ** decimals;
+const divDec6 = (amount) => amount / 10 ** 6;
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 const AddressZero = "0x0000000000000000000000000000000000000000";
 const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
+// Helper to get auction data from individual mappings
+async function getAuctionData(content, tokenId) {
+  return {
+    epochId: await content.id_EpochId(tokenId),
+    initPrice: await content.id_InitPrice(tokenId),
+    startTime: await content.id_StartTime(tokenId)
+  };
+}
+
 let owner, protocol, user0, user1, user2, creator1, creator2;
-let weth, donut, core, multicall;
+let usdc, donut, core, multicall;
 let content, minter, rewarder, auction, unit, lpToken;
 let unitFactory, contentFactory, minterFactory, rewarderFactory, auctionFactory;
 let uniswapFactory, uniswapRouter;
@@ -19,12 +29,13 @@ describe("Content Tests", function () {
 
     [owner, protocol, user0, user1, user2, creator1, creator2] = await ethers.getSigners();
 
-    // Deploy WETH
-    const wethArtifact = await ethers.getContractFactory("MockWETH");
-    weth = await wethArtifact.deploy();
+    // Deploy USDC (6 decimals) as quote token
+    const usdcArtifact = await ethers.getContractFactory("MockUSDC");
+    usdc = await usdcArtifact.deploy();
 
-    // Deploy mock DONUT token
-    donut = await wethArtifact.deploy();
+    // Deploy mock DONUT token (18 decimals)
+    const donutArtifact = await ethers.getContractFactory("MockWETH");
+    donut = await donutArtifact.deploy();
 
     // Deploy mock Uniswap
     const mockUniswapFactoryArtifact = await ethers.getContractFactory("MockUniswapV2Factory");
@@ -40,9 +51,9 @@ describe("Content Tests", function () {
     rewarderFactory = await (await ethers.getContractFactory("RewarderFactory")).deploy();
     auctionFactory = await (await ethers.getContractFactory("AuctionFactory")).deploy();
 
-    // Deploy Core
+    // Deploy Core with USDC as quote
     core = await (await ethers.getContractFactory("Core")).deploy(
-      weth.address,
+      usdc.address,
       donut.address,
       uniswapFactory.address,
       uniswapRouter.address,
@@ -58,14 +69,14 @@ describe("Content Tests", function () {
     // Deploy Multicall
     multicall = await (await ethers.getContractFactory("Multicall")).deploy(
       core.address,
-      weth.address,
+      usdc.address,
       donut.address
     );
 
-    // Mint DONUT and WETH to users
+    // Mint DONUT to user0 for launch, USDC to users for collections
     await donut.connect(user0).deposit({ value: convert("10000", 18) });
-    await weth.connect(user1).deposit({ value: convert("100", 18) });
-    await weth.connect(user2).deposit({ value: convert("100", 18) });
+    await usdc.mint(user1.address, convert("100000", 6));
+    await usdc.mint(user2.address, convert("100000", 6));
 
     // Launch content engine
     const launchParams = {
@@ -78,12 +89,12 @@ describe("Content Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("1", 6), // 10 USDC (6 decimals)
       contentIsModerated: false,
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6), // 1000 USDC
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6), // 1 USDC
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -167,7 +178,7 @@ describe("Content Tests", function () {
       const price = await contentContract.getPrice(newTokenId);
       const minInitPrice = await contentContract.minInitPrice();
       expect(price).to.equal(minInitPrice);
-      console.log("Initial price:", divDec(price), "WETH");
+      console.log("Initial price:", divDec6(price), "USDC");
     });
 
     it("Price decays over time", async function () {
@@ -181,8 +192,8 @@ describe("Content Tests", function () {
       await network.provider.send("evm_mine");
 
       const priceAfter = await contentContract.getPrice(1);
-      console.log("Price before:", divDec(priceBefore), "WETH");
-      console.log("Price after 15 days:", divDec(priceAfter), "WETH");
+      console.log("Price before:", divDec6(priceBefore), "USDC");
+      console.log("Price after 15 days:", divDec6(priceAfter), "USDC");
 
       expect(priceAfter).to.be.lt(priceBefore);
       // Should be approximately half
@@ -199,7 +210,7 @@ describe("Content Tests", function () {
 
       const price = await contentContract.getPrice(1);
       expect(price).to.equal(0);
-      console.log("Price after 31 days:", divDec(price), "WETH");
+      console.log("Price after 31 days:", divDec6(price), "USDC");
     });
   });
 
@@ -218,13 +229,13 @@ describe("Content Tests", function () {
       const contentContract = await ethers.getContractAt("Content", content);
 
       const tokenId = 3;
-      const auctionData = await contentContract.getAuction(tokenId);
+      const auctionData = await getAuctionData(contentContract, tokenId);
       const price = await contentContract.getPrice(tokenId);
 
-      console.log("Price to collect:", divDec(price), "WETH");
+      console.log("Price to collect:", divDec6(price), "USDC");
 
-      // Approve WETH
-      await weth.connect(user1).approve(content, price);
+      // Approve USDC
+      await usdc.connect(user1).approve(content, price);
 
       // Use block.timestamp for deadline
       const block = await ethers.provider.getBlock("latest");
@@ -248,58 +259,58 @@ describe("Content Tests", function () {
       // Otherwise new price is 2x the previous price
       // In either case, new price should be at least minInitPrice
       expect(newPrice).to.be.gte(minInitPrice);
-      console.log("New price after collection:", divDec(newPrice), "WETH");
+      console.log("New price after collection:", divDec6(newPrice), "USDC");
     });
 
-    it("Fee distribution is correct (80/15/2/2/1)", async function () {
+    it("Fee distribution is correct (80/15/3/1/1)", async function () {
       console.log("******************************************************");
       const contentContract = await ethers.getContractAt("Content", content);
 
       const tokenId = 3;
-      const auctionData = await contentContract.getAuction(tokenId);
+      const auctionData = await getAuctionData(contentContract, tokenId);
       const price = await contentContract.getPrice(tokenId);
       const teamAddress = await contentContract.team();
 
       // Get balances before
-      const user1WethBefore = await weth.balanceOf(user1.address);
-      const auctionWethBefore = await weth.balanceOf(auction);
-      const creatorWethBefore = await weth.balanceOf(creator1.address);
-      const teamWethBefore = await weth.balanceOf(teamAddress);
-      const protocolWethBefore = await weth.balanceOf(protocol.address);
+      const user1UsdcBefore = await usdc.balanceOf(user1.address);
+      const auctionUsdcBefore = await usdc.balanceOf(auction);
+      const creatorUsdcBefore = await usdc.balanceOf(creator1.address);
+      const teamUsdcBefore = await usdc.balanceOf(teamAddress);
+      const protocolUsdcBefore = await usdc.balanceOf(protocol.address);
 
       // User2 collects from user1
-      await weth.connect(user2).approve(content, price);
+      await usdc.connect(user2).approve(content, price);
       const block = await ethers.provider.getBlock("latest");
       const deadline = block.timestamp + 3600;
       await contentContract.connect(user2).collect(user2.address, tokenId, auctionData.epochId, deadline, price);
 
       // Get balances after
-      const user1WethAfter = await weth.balanceOf(user1.address);
-      const auctionWethAfter = await weth.balanceOf(auction);
-      const creatorWethAfter = await weth.balanceOf(creator1.address);
-      const teamWethAfter = await weth.balanceOf(teamAddress);
-      const protocolWethAfter = await weth.balanceOf(protocol.address);
+      const user1UsdcAfter = await usdc.balanceOf(user1.address);
+      const auctionUsdcAfter = await usdc.balanceOf(auction);
+      const creatorUsdcAfter = await usdc.balanceOf(creator1.address);
+      const teamUsdcAfter = await usdc.balanceOf(teamAddress);
+      const protocolUsdcAfter = await usdc.balanceOf(protocol.address);
 
       // Calculate received amounts
-      const prevOwnerReceived = user1WethAfter.sub(user1WethBefore);
-      const treasuryReceived = auctionWethAfter.sub(auctionWethBefore);
-      const creatorReceived = creatorWethAfter.sub(creatorWethBefore);
-      const teamReceived = teamWethAfter.sub(teamWethBefore);
-      const protocolReceived = protocolWethAfter.sub(protocolWethBefore);
+      const prevOwnerReceived = user1UsdcAfter.sub(user1UsdcBefore);
+      const treasuryReceived = auctionUsdcAfter.sub(auctionUsdcBefore);
+      const creatorReceived = creatorUsdcAfter.sub(creatorUsdcBefore);
+      const teamReceived = teamUsdcAfter.sub(teamUsdcBefore);
+      const protocolReceived = protocolUsdcAfter.sub(protocolUsdcBefore);
 
-      console.log("Price paid:", divDec(price));
-      console.log("Previous owner (80%):", divDec(prevOwnerReceived));
-      console.log("Treasury (15%):", divDec(treasuryReceived));
-      console.log("Creator (2%):", divDec(creatorReceived));
-      console.log("Team (2%):", divDec(teamReceived));
-      console.log("Protocol (1%):", divDec(protocolReceived));
+      console.log("Price paid:", divDec6(price));
+      console.log("Previous owner (80%):", divDec6(prevOwnerReceived));
+      console.log("Treasury (15%):", divDec6(treasuryReceived));
+      console.log("Creator (3%):", divDec6(creatorReceived));
+      console.log("Team (1%):", divDec6(teamReceived));
+      console.log("Protocol (1%):", divDec6(protocolReceived));
 
       // Verify percentages
       const tolerance = price.div(100); // 1% tolerance
       expect(prevOwnerReceived).to.be.closeTo(price.mul(8000).div(10000), tolerance);
       expect(treasuryReceived).to.be.closeTo(price.mul(1500).div(10000), tolerance);
-      expect(creatorReceived).to.be.closeTo(price.mul(200).div(10000), tolerance);
-      expect(teamReceived).to.be.closeTo(price.mul(200).div(10000), tolerance);
+      expect(creatorReceived).to.be.closeTo(price.mul(300).div(10000), tolerance);
+      expect(teamReceived).to.be.closeTo(price.mul(100).div(10000), tolerance);
       expect(protocolReceived).to.be.closeTo(price.mul(100).div(10000), tolerance);
     });
 
@@ -309,7 +320,7 @@ describe("Content Tests", function () {
 
       const user2Balance = await rewarderContract.account_Balance(user2.address);
       expect(user2Balance).to.be.gt(0);
-      console.log("User2 stake in rewarder:", divDec(user2Balance));
+      console.log("User2 stake in rewarder:", divDec6(user2Balance));
     });
 
     it("Previous owner stake is withdrawn", async function () {
@@ -320,7 +331,7 @@ describe("Content Tests", function () {
       // User1 should have 0 stake now (was withdrawn when user2 collected)
       const user1Balance = await rewarderContract.account_Balance(user1.address);
       expect(user1Balance).to.equal(0);
-      console.log("User1 stake after being collected from:", divDec(user1Balance));
+      console.log("User1 stake after being collected from:", divDec6(user1Balance));
     });
 
     it("Cannot collect with wrong epochId", async function () {
@@ -330,7 +341,7 @@ describe("Content Tests", function () {
       const tokenId = 3;
       const price = await contentContract.getPrice(tokenId);
 
-      await weth.connect(user1).approve(content, price);
+      await usdc.connect(user1).approve(content, price);
       const block = await ethers.provider.getBlock("latest");
       const deadline = block.timestamp + 3600;
 
@@ -345,10 +356,10 @@ describe("Content Tests", function () {
       const contentContract = await ethers.getContractAt("Content", content);
 
       const tokenId = 3;
-      const auctionData = await contentContract.getAuction(tokenId);
+      const auctionData = await getAuctionData(contentContract, tokenId);
       const price = await contentContract.getPrice(tokenId);
 
-      await weth.connect(user1).approve(content, price);
+      await usdc.connect(user1).approve(content, price);
       const block = await ethers.provider.getBlock("latest");
       const expiredDeadline = block.timestamp - 1;
 
@@ -366,9 +377,9 @@ describe("Content Tests", function () {
       await contentContract.connect(creator1).create(creator1.address, "ipfs://maxprice-test");
       const freshTokenId = await contentContract.nextTokenId();
 
-      const auctionData = await contentContract.getAuction(freshTokenId);
+      const auctionData = await getAuctionData(contentContract, freshTokenId);
       const price = await contentContract.getPrice(freshTokenId);
-      console.log("Fresh content price:", divDec(price));
+      console.log("Fresh content price:", divDec6(price));
 
       // If price is 0 (due to decay being faster than expected), skip this test
       if (price.eq(0)) {
@@ -376,7 +387,7 @@ describe("Content Tests", function () {
         return;
       }
 
-      await weth.connect(user1).approve(content, price);
+      await usdc.connect(user1).approve(content, price);
       const block = await ethers.provider.getBlock("latest");
       const deadline = block.timestamp + 3600;
       const maxPrice = 0; // Set to 0 to guarantee it's less than any positive price
@@ -396,7 +407,7 @@ describe("Content Tests", function () {
 
       // Non-existent tokens have id_IsApproved = false (default), so Content__NotApproved is thrown
       await expect(
-        contentContract.connect(user1).collect(user1.address, 999, 0, deadline, convert("1", 18))
+        contentContract.connect(user1).collect(user1.address, 999, 0, deadline, convert("1000", 6))
       ).to.be.revertedWith("Content__NotApproved()");
       console.log("Collection correctly reverted with invalid tokenId");
     });
@@ -503,12 +514,12 @@ describe("Content Moderation Tests", function () {
       initialUps: convert("4", 18),
       tailUps: convert("0.01", 18),
       halvingPeriod: 86400 * 7,
-      contentMinInitPrice: convert("0.01", 18),
+      contentMinInitPrice: convert("1", 6), // 10 USDC
       contentIsModerated: true, // MODERATED
-      auctionInitPrice: convert("1", 18),
+      auctionInitPrice: convert("1000", 6),
       auctionEpochPeriod: 86400,
       auctionPriceMultiplier: convert("1.5", 18),
-      auctionMinInitPrice: convert("0.001", 18),
+      auctionMinInitPrice: convert("1", 6),
     };
 
     await donut.connect(user0).approve(core.address, launchParams.donutAmount);
@@ -546,12 +557,12 @@ describe("Content Moderation Tests", function () {
     console.log("******************************************************");
     const contentContract = await ethers.getContractAt("Content", moderatedContent);
 
-    const auctionData = await contentContract.getAuction(1);
+    const auctionData = await getAuctionData(contentContract, 1);
     const price = await contentContract.getPrice(1);
     const block = await ethers.provider.getBlock("latest");
     const deadline = block.timestamp + 3600;
 
-    await weth.connect(user1).approve(moderatedContent, price);
+    await usdc.connect(user1).approve(moderatedContent, price);
 
     await expect(
       contentContract.connect(user1).collect(user1.address, 1, auctionData.epochId, deadline, price)

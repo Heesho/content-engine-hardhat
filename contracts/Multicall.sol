@@ -9,16 +9,11 @@ import {IRewarder} from "./interfaces/IRewarder.sol";
 import {IAuction} from "./interfaces/IAuction.sol";
 import {ICore} from "./interfaces/ICore.sol";
 
-interface IWETH {
-    function deposit() external payable;
-    function withdraw(uint256) external;
-}
-
 /**
  * @title Multicall
  * @author heesho
  * @notice Helper contract for batched operations and aggregated view functions.
- * @dev Provides ETH wrapping for collecting content and comprehensive state queries.
+ * @dev Provides convenience functions for content collection and comprehensive state queries.
  */
 contract Multicall {
     using SafeERC20 for IERC20;
@@ -28,68 +23,52 @@ contract Multicall {
     /*----------  IMMUTABLES  -------------------------------------------*/
 
     address public immutable core;
-    address public immutable weth;
+    address public immutable quote;
     address public immutable donut;
 
     /*----------  STRUCTS  ----------------------------------------------*/
 
     /**
-     * @notice Aggregated state for a Content contract.
+     * @notice Aggregated state for a Unit ecosystem.
      */
-    struct ContentState {
-        address rewarder;
+    struct UnitState {
+        uint256 index;
         address unit;
-        address treasury;
+        address quote;
+        address launcher;
+        address minter;
+        address rewarder;
+        address auction;
+        address lp;
         string uri;
         bool isModerated;
         uint256 totalSupply;
-        uint256 minInitPrice;
-        uint256 unitPrice;
-        uint256 ethBalance;
-        uint256 wethBalance;
-        uint256 donutBalance;
-        uint256 unitBalance;
+        uint256 marketCapInDonut;
+        uint256 liquidityInDonut;
+        uint256 priceInDonut;
+        uint256 contentRewardForDuration;
+        uint256 accountQuoteBalance;
+        uint256 accountUnitBalance;
+        uint256 accountContentOwned;
+        uint256 accountUnitEarned;
+        bool accountIsModerator;
     }
 
     /**
      * @notice State for a single content token.
      */
-    struct TokenState {
+    struct ContentState {
         uint256 tokenId;
-        address owner;
-        address creator;
-        bool isApproved;
-        uint256 stake;
         uint256 epochId;
+        uint256 startTime;
         uint256 initPrice;
-        uint256 startTime;
+        uint256 stake;
         uint256 price;
-        string tokenUri;
-    }
-
-    /**
-     * @notice Aggregated state for a Minter contract.
-     */
-    struct MinterState {
-        uint256 activePeriod;
-        uint256 weeklyEmission;
-        uint256 currentUps;
-        uint256 initialUps;
-        uint256 tailUps;
-        uint256 halvingPeriod;
-        uint256 startTime;
-    }
-
-    /**
-     * @notice Aggregated state for a Rewarder contract.
-     */
-    struct RewarderState {
-        uint256 totalSupply;
-        uint256 accountBalance;
-        uint256 earnedUnit;
-        uint256 earnedQuote;
-        uint256 leftUnit;
-        uint256 leftQuote;
+        uint256 rewardForDuration;
+        address creator;
+        address owner;
+        string uri;
+        bool isApproved;
     }
 
     /**
@@ -102,9 +81,8 @@ contract Multicall {
         address paymentToken;
         uint256 price;
         uint256 paymentTokenPrice;
-        uint256 wethAccumulated;
-        uint256 wethBalance;
-        uint256 donutBalance;
+        uint256 quoteAccumulated;
+        uint256 quoteBalance;
         uint256 paymentTokenBalance;
     }
 
@@ -113,21 +91,21 @@ contract Multicall {
     /**
      * @notice Deploy the Multicall helper contract.
      * @param _core Core contract address
-     * @param _weth Wrapped ETH address
+     * @param _quote Quote token address (e.g. USDC)
      * @param _donut DONUT token address
      */
-    constructor(address _core, address _weth, address _donut) {
-        if (_core == address(0) || _weth == address(0) || _donut == address(0)) revert Multicall__ZeroAddress();
+    constructor(address _core, address _quote, address _donut) {
+        if (_core == address(0) || _quote == address(0) || _donut == address(0)) revert Multicall__ZeroAddress();
         core = _core;
-        weth = _weth;
+        quote = _quote;
         donut = _donut;
     }
 
     /*----------  EXTERNAL FUNCTIONS  -----------------------------------*/
 
     /**
-     * @notice Collect content using ETH (wraps to WETH automatically).
-     * @dev Wraps sent ETH to WETH, approves the content, and calls collect(). Refunds excess.
+     * @notice Collect content using quote token (e.g. USDC).
+     * @dev Transfers quote from caller, approves content, and calls collect(). Refunds excess.
      * @param content Content contract address
      * @param tokenId Token ID to collect
      * @param epochId Expected epoch ID
@@ -140,16 +118,16 @@ contract Multicall {
         uint256 epochId,
         uint256 deadline,
         uint256 maxPrice
-    ) external payable {
-        IWETH(weth).deposit{value: msg.value}();
-        IERC20(weth).safeApprove(content, 0);
-        IERC20(weth).safeApprove(content, msg.value);
+    ) external {
+        IERC20(quote).safeTransferFrom(msg.sender, address(this), maxPrice);
+        IERC20(quote).safeApprove(content, 0);
+        IERC20(quote).safeApprove(content, maxPrice);
         IContent(content).collect(msg.sender, tokenId, epochId, deadline, maxPrice);
 
-        // Refund unused WETH
-        uint256 wethBalance = IERC20(weth).balanceOf(address(this));
-        if (wethBalance > 0) {
-            IERC20(weth).safeTransfer(msg.sender, wethBalance);
+        // Refund unused quote
+        uint256 quoteBalance = IERC20(quote).balanceOf(address(this));
+        if (quoteBalance > 0) {
+            IERC20(quote).safeTransfer(msg.sender, quoteBalance);
         }
     }
 
@@ -166,7 +144,7 @@ contract Multicall {
         address paymentToken = IAuction(auction).paymentToken();
         uint256 price = IAuction(auction).getPrice();
         address[] memory assets = new address[](1);
-        assets[0] = weth;
+        assets[0] = quote;
 
         IERC20(paymentToken).safeTransferFrom(msg.sender, address(this), price);
         IERC20(paymentToken).safeApprove(auction, 0);
@@ -238,34 +216,51 @@ contract Multicall {
     /*----------  VIEW FUNCTIONS  ---------------------------------------*/
 
     /**
-     * @notice Get aggregated state for a Content contract.
+     * @notice Get aggregated state for a Unit ecosystem.
      * @param content Content contract address
      * @param account User address (or address(0) to skip balance queries)
-     * @return state Aggregated content state
+     * @return state Aggregated unit state
      */
-    function getContent(address content, address account) external view returns (ContentState memory state) {
-        state.rewarder = IContent(content).rewarder();
-        state.unit = IContent(content).unit();
-        state.treasury = IContent(content).treasury();
+    function getUnitState(address content, address account) external view returns (UnitState memory state) {
+        // Core registry data
+        state.index = ICore(core).content_Index(content);
+        state.unit = ICore(core).contentToUnit(content);
+        state.quote = IContent(content).quote();
+        state.launcher = ICore(core).contentToLauncher(content);
+        state.minter = ICore(core).contentToMinter(content);
+        state.rewarder = ICore(core).contentToRewarder(content);
+        state.auction = ICore(core).contentToAuction(content);
+        state.lp = ICore(core).contentToLP(content);
+
+        // Content state
         state.uri = IContent(content).uri();
         state.isModerated = IContent(content).isModerated();
         state.totalSupply = IContent(content).totalSupply();
-        state.minInitPrice = IContent(content).minInitPrice();
 
-        // Calculate Unit price in DONUT from LP reserves
-        address auction = ICore(core).contentToAuction(content);
-        if (auction != address(0)) {
-            address lpToken = IAuction(auction).paymentToken();
-            uint256 donutInLP = IERC20(donut).balanceOf(lpToken);
-            uint256 unitInLP = IERC20(state.unit).balanceOf(lpToken);
-            state.unitPrice = unitInLP == 0 ? 0 : donutInLP * 1e18 / unitInLP;
+        // Calculate Unit price, market cap, and liquidity in DONUT from LP reserves
+        if (state.lp != address(0)) {
+            uint256 donutInLP = IERC20(donut).balanceOf(state.lp);
+            uint256 unitInLP = IERC20(state.unit).balanceOf(state.lp);
+            state.priceInDonut = unitInLP == 0 ? 0 : donutInLP * 1e18 / unitInLP;
+            state.liquidityInDonut = donutInLP * 2;
+
+            // Market cap = total unit supply * unit price in DONUT
+            uint256 unitTotalSupply = IERC20(state.unit).totalSupply();
+            state.marketCapInDonut = unitTotalSupply * state.priceInDonut / 1e18;
         }
 
-        // User balances
-        state.ethBalance = account == address(0) ? 0 : account.balance;
-        state.wethBalance = account == address(0) ? 0 : IERC20(weth).balanceOf(account);
-        state.donutBalance = account == address(0) ? 0 : IERC20(donut).balanceOf(account);
-        state.unitBalance = account == address(0) ? 0 : IERC20(state.unit).balanceOf(account);
+        // Content reward for duration (weekly Unit emissions to content stakers)
+        state.contentRewardForDuration = IRewarder(state.rewarder).getRewardForDuration(state.unit);
+
+        // User balances and earnings
+        if (account != address(0)) {
+            state.accountQuoteBalance = IERC20(state.quote).balanceOf(account);
+            state.accountUnitBalance = IERC20(state.unit).balanceOf(account);
+            state.accountContentOwned = IContent(content).balanceOf(account);
+            state.accountUnitEarned = IRewarder(state.rewarder).earned(account, state.unit);
+            state.accountIsModerator =
+                IContent(content).owner() == account || IContent(content).account_IsModerator(account);
+        }
 
         return state;
     }
@@ -274,61 +269,27 @@ contract Multicall {
      * @notice Get state for a specific content token.
      * @param content Content contract address
      * @param tokenId Token ID
-     * @return state Token state
+     * @return state Content token state
      */
-    function getToken(address content, uint256 tokenId) external view returns (TokenState memory state) {
-        state.tokenId = tokenId;
-        state.owner = IContent(content).ownerOf(tokenId);
-        state.creator = IContent(content).id_Creator(tokenId);
-        state.isApproved = IContent(content).id_IsApproved(tokenId);
-        state.stake = IContent(content).id_Stake(tokenId);
-
-        IContent.Auction memory auction = IContent(content).getAuction(tokenId);
-        state.epochId = auction.epochId;
-        state.initPrice = auction.initPrice;
-        state.startTime = auction.startTime;
-        state.price = IContent(content).getPrice(tokenId);
-        state.tokenUri = IContent(content).tokenURI(tokenId);
-
-        return state;
-    }
-
-    /**
-     * @notice Get aggregated state for a Minter contract.
-     * @param content Content contract address
-     * @return state Minter state
-     */
-    function getMinter(address content) external view returns (MinterState memory state) {
-        address minter = ICore(core).contentToMinter(content);
-
-        state.activePeriod = IMinter(minter).activePeriod();
-        state.weeklyEmission = IMinter(minter).weeklyEmission();
-        state.currentUps = IMinter(minter).getUps();
-        state.initialUps = IMinter(minter).initialUps();
-        state.tailUps = IMinter(minter).tailUps();
-        state.halvingPeriod = IMinter(minter).halvingPeriod();
-        state.startTime = IMinter(minter).startTime();
-
-        return state;
-    }
-
-    /**
-     * @notice Get aggregated state for a Rewarder contract.
-     * @param content Content contract address
-     * @param account User address
-     * @return state Rewarder state
-     */
-    function getRewarder(address content, address account) external view returns (RewarderState memory state) {
-        address rewarder = ICore(core).contentToRewarder(content);
+    function getContentState(address content, uint256 tokenId) external view returns (ContentState memory state) {
+        address rewarder = IContent(content).rewarder();
         address unitToken = IContent(content).unit();
-        address quoteToken = IContent(content).quote();
 
-        state.totalSupply = IRewarder(rewarder).totalSupply();
-        state.accountBalance = account == address(0) ? 0 : IRewarder(rewarder).account_Balance(account);
-        state.earnedUnit = account == address(0) ? 0 : IRewarder(rewarder).earned(account, unitToken);
-        state.earnedQuote = account == address(0) ? 0 : IRewarder(rewarder).earned(account, quoteToken);
-        state.leftUnit = IRewarder(rewarder).left(unitToken);
-        state.leftQuote = IRewarder(rewarder).left(quoteToken);
+        state.tokenId = tokenId;
+        state.epochId = IContent(content).id_EpochId(tokenId);
+        state.startTime = IContent(content).id_StartTime(tokenId);
+        state.initPrice = IContent(content).id_InitPrice(tokenId);
+        state.stake = IContent(content).id_Stake(tokenId);
+        state.price = IContent(content).getPrice(tokenId);
+        state.creator = IContent(content).id_Creator(tokenId);
+        state.owner = IContent(content).ownerOf(tokenId);
+        state.uri = IContent(content).tokenURI(tokenId);
+        state.isApproved = IContent(content).id_IsApproved(tokenId);
+
+        // Calculate this content's share of weekly rewards
+        uint256 totalStaked = IRewarder(rewarder).totalSupply();
+        uint256 totalRewardForDuration = IRewarder(rewarder).getRewardForDuration(unitToken);
+        state.rewardForDuration = totalStaked == 0 ? 0 : totalRewardForDuration * state.stake / totalStaked;
 
         return state;
     }
@@ -339,7 +300,7 @@ contract Multicall {
      * @param account User address (or address(0) to skip balance queries)
      * @return state Auction state
      */
-    function getAuction(address content, address account) external view returns (AuctionState memory state) {
+    function getAuctionState(address content, address account) external view returns (AuctionState memory state) {
         address auction = ICore(core).contentToAuction(content);
 
         state.epochId = IAuction(auction).epochId();
@@ -353,9 +314,8 @@ contract Multicall {
         state.paymentTokenPrice =
             lpTotalSupply == 0 ? 0 : IERC20(donut).balanceOf(state.paymentToken) * 2e18 / lpTotalSupply;
 
-        state.wethAccumulated = IERC20(weth).balanceOf(auction);
-        state.wethBalance = account == address(0) ? 0 : IERC20(weth).balanceOf(account);
-        state.donutBalance = account == address(0) ? 0 : IERC20(donut).balanceOf(account);
+        state.quoteAccumulated = IERC20(quote).balanceOf(auction);
+        state.quoteBalance = account == address(0) ? 0 : IERC20(quote).balanceOf(account);
         state.paymentTokenBalance = account == address(0) ? 0 : IERC20(state.paymentToken).balanceOf(account);
 
         return state;

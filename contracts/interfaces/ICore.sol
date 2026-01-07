@@ -36,12 +36,13 @@ interface ICore {
             address lpToken
         );
     function protocolFeeAddress() external view returns (address);
-    function weth() external view returns (address);
+    function quote() external view returns (address);
     function donutToken() external view returns (address);
     function uniswapV2Factory() external view returns (address);
     function uniswapV2Router() external view returns (address);
     function minDonutForLaunch() external view returns (uint256);
     function isDeployedContent(address content) external view returns (bool);
+    function content_Index(address content) external view returns (uint256);
     function contentToLauncher(address content) external view returns (address);
     function contentToUnit(address content) external view returns (address);
     function contentToAuction(address content) external view returns (address);

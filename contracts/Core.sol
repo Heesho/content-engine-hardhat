@@ -38,7 +38,7 @@ contract Core is Ownable, ReentrancyGuard {
 
     /*----------  IMMUTABLES  -------------------------------------------*/
 
-    address public immutable weth; // WETH token (quote token)
+    address public immutable quote; // quote token for content collections (e.g. USDC)
     address public immutable donutToken; // token required to launch
     address public immutable uniswapV2Factory; // Uniswap V2 factory
     address public immutable uniswapV2Router; // Uniswap V2 router
@@ -55,6 +55,7 @@ contract Core is Ownable, ReentrancyGuard {
 
     address[] public deployedContents; // array of all deployed content contracts
     mapping(address => bool) public isDeployedContent; // content => is valid
+    mapping(address => uint256) public content_Index; // content => index in deployedContents
     mapping(address => address) public contentToLauncher; // content => launcher address
     mapping(address => address) public contentToUnit; // content => Unit token
     mapping(address => address) public contentToAuction; // content => Auction contract
@@ -126,7 +127,7 @@ contract Core is Ownable, ReentrancyGuard {
 
     /**
      * @notice Deploy the Core launchpad contract.
-     * @param _weth WETH token address (quote token)
+     * @param _quote Quote token address (e.g. USDC)
      * @param _donutToken DONUT token address
      * @param _uniswapV2Factory Uniswap V2 factory address
      * @param _uniswapV2Router Uniswap V2 router address
@@ -139,7 +140,7 @@ contract Core is Ownable, ReentrancyGuard {
      * @param _minDonutForLaunch Minimum DONUT required to launch
      */
     constructor(
-        address _weth,
+        address _quote,
         address _donutToken,
         address _uniswapV2Factory,
         address _uniswapV2Router,
@@ -152,14 +153,14 @@ contract Core is Ownable, ReentrancyGuard {
         uint256 _minDonutForLaunch
     ) {
         if (
-            _weth == address(0) || _donutToken == address(0) || _uniswapV2Factory == address(0)
+            _quote == address(0) || _donutToken == address(0) || _uniswapV2Factory == address(0)
                 || _uniswapV2Router == address(0) || _unitFactory == address(0) || _contentFactory == address(0)
                 || _minterFactory == address(0) || _auctionFactory == address(0) || _rewarderFactory == address(0)
         ) {
             revert Core__ZeroAddress();
         }
 
-        weth = _weth;
+        quote = _quote;
         donutToken = _donutToken;
         uniswapV2Factory = _uniswapV2Factory;
         uniswapV2Router = _uniswapV2Router;
@@ -250,7 +251,7 @@ contract Core is Ownable, ReentrancyGuard {
             params.tokenSymbol,
             params.uri,
             unit,
-            weth,
+            quote,
             auction,
             params.launcher, // team address = launcher
             address(this),
@@ -278,6 +279,7 @@ contract Core is Ownable, ReentrancyGuard {
         IContent(content).transferOwnership(params.launcher);
 
         // Update registry
+        content_Index[content] = deployedContents.length;
         deployedContents.push(content);
         isDeployedContent[content] = true;
         contentToLauncher[content] = params.launcher;
