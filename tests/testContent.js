@@ -187,13 +187,13 @@ describe("Content Tests", function () {
 
       const priceBefore = await contentContract.getPrice(1);
 
-      // Forward 15 days (half of EPOCH_PERIOD)
-      await network.provider.send("evm_increaseTime", [86400 * 15]);
+      // Forward 12 hours (half of EPOCH_PERIOD which is 1 day)
+      await network.provider.send("evm_increaseTime", [43200]);
       await network.provider.send("evm_mine");
 
       const priceAfter = await contentContract.getPrice(1);
       console.log("Price before:", divDec6(priceBefore), "USDC");
-      console.log("Price after 15 days:", divDec6(priceAfter), "USDC");
+      console.log("Price after 12 hours:", divDec6(priceAfter), "USDC");
 
       expect(priceAfter).to.be.lt(priceBefore);
       // Should be approximately half
@@ -204,13 +204,13 @@ describe("Content Tests", function () {
       console.log("******************************************************");
       const contentContract = await ethers.getContractAt("Content", content);
 
-      // Forward another 16 days (total > 30 days)
-      await network.provider.send("evm_increaseTime", [86400 * 16]);
+      // Forward another 12 hours (total > 1 day EPOCH_PERIOD)
+      await network.provider.send("evm_increaseTime", [43200]);
       await network.provider.send("evm_mine");
 
       const price = await contentContract.getPrice(1);
       expect(price).to.equal(0);
-      console.log("Price after 31 days:", divDec6(price), "USDC");
+      console.log("Price after 1+ day:", divDec6(price), "USDC");
     });
   });
 

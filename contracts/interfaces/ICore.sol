@@ -42,7 +42,7 @@ interface ICore {
     function uniswapV2Router() external view returns (address);
     function minDonutForLaunch() external view returns (uint256);
     function isDeployedContent(address content) external view returns (bool);
-    function content_Index(address content) external view returns (uint256);
+    function contentToIndex(address content) external view returns (uint256);
     function contentToLauncher(address content) external view returns (address);
     function contentToUnit(address content) external view returns (address);
     function contentToAuction(address content) external view returns (address);

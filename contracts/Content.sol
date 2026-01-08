@@ -30,7 +30,7 @@ contract Content is ERC721, ERC721Enumerable, ERC721URIStorage, ReentrancyGuard,
     uint256 public constant PROTOCOL_FEE = 100; // 1% to protocol
     uint256 public constant DIVISOR = 10_000;
     uint256 public constant PRECISION = 1e18;
-    uint256 public constant EPOCH_PERIOD = 30 days;
+    uint256 public constant EPOCH_PERIOD = 1 days;
     uint256 public constant PRICE_MULTIPLIER = 2e18;
     uint256 public constant ABS_MAX_INIT_PRICE = type(uint192).max;
 

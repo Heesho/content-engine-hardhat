@@ -222,7 +222,7 @@ describe("EXTREME Stress Tests", function () {
       const auctionData = await getAuctionData(content, tokenId);
 
       // Move to exactly EPOCH_PERIOD seconds
-      const EPOCH_PERIOD = 30 * DAY;
+      const EPOCH_PERIOD = 1 * DAY;
       await ethers.provider.send("evm_increaseTime", [EPOCH_PERIOD]);
       await ethers.provider.send("evm_mine");
 
@@ -234,7 +234,7 @@ describe("EXTREME Stress Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://one-second-test");
       const tokenId = await content.nextTokenId();
 
-      const EPOCH_PERIOD = 30 * DAY;
+      const EPOCH_PERIOD = 1 * DAY;
       await ethers.provider.send("evm_increaseTime", [EPOCH_PERIOD - 1]);
       await ethers.provider.send("evm_mine");
 
@@ -773,8 +773,8 @@ describe("EXTREME Attack Vector Tests", function () {
       // This is theoretical - we can't actually set timestamp to max
       // But we verify the math doesn't overflow
       const initPrice = convert("1000", 6);
-      const timePassed = ethers.BigNumber.from(30 * DAY);
-      const epochPeriod = ethers.BigNumber.from(30 * DAY);
+      const timePassed = ethers.BigNumber.from(1 * DAY);
+      const epochPeriod = ethers.BigNumber.from(1 * DAY);
 
       // Simulate price calculation
       const decay = initPrice.mul(timePassed).div(epochPeriod);

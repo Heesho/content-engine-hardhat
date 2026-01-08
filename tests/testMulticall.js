@@ -195,6 +195,27 @@ describe("Multicall Tests", function () {
       expect(state.accountQuoteBalance).to.equal(0);
       expect(state.accountUnitBalance).to.equal(0);
       expect(state.accountContentOwned).to.equal(0);
+      expect(state.accountContentStaked).to.equal(0);
+    });
+
+    it("Should return correct accountContentStaked after collection", async function () {
+      // Create content
+      await content.connect(user1).create(user1.address, "ipfs://staketest");
+      const tokenId = await content.nextTokenId();
+
+      // User2 collects it
+      const price = await content.getPrice(tokenId);
+      await usdc.mint(user2.address, price);
+      await usdc.connect(user2).approve(content.address, price);
+      const epochId = await content.id_EpochId(tokenId);
+      await content.connect(user2).collect(user2.address, tokenId, epochId, (await ethers.provider.getBlock("latest")).timestamp + 1000, price);
+
+      // Check accountContentStaked matches rewarder balance (stake in rewarder)
+      const state = await multicall.getUnitState(content.address, user2.address);
+      const rewarderBalance = await rewarder.account_Balance(user2.address);
+      expect(state.accountContentStaked).to.equal(rewarderBalance);
+      expect(state.accountContentStaked).to.be.gt(0);
+      expect(state.accountContentOwned).to.equal(1);
     });
 
     it("Should calculate market cap and liquidity correctly", async function () {
@@ -392,9 +413,9 @@ describe("Multicall Tests", function () {
       expect(await newContent.owner()).to.equal(user2.address);
     });
 
-    it("Should have correct content_Index for launched content", async function () {
+    it("Should have correct contentToIndex for launched content", async function () {
       // The content launched in setup should have index 0
-      const index = await core.content_Index(content.address);
+      const index = await core.contentToIndex(content.address);
       expect(index).to.equal(0);
     });
   });

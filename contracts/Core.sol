@@ -55,7 +55,7 @@ contract Core is Ownable, ReentrancyGuard {
 
     address[] public deployedContents; // array of all deployed content contracts
     mapping(address => bool) public isDeployedContent; // content => is valid
-    mapping(address => uint256) public content_Index; // content => index in deployedContents
+    mapping(address => uint256) public contentToIndex; // content => index in deployedContents
     mapping(address => address) public contentToLauncher; // content => launcher address
     mapping(address => address) public contentToUnit; // content => Unit token
     mapping(address => address) public contentToAuction; // content => Auction contract
@@ -279,7 +279,7 @@ contract Core is Ownable, ReentrancyGuard {
         IContent(content).transferOwnership(params.launcher);
 
         // Update registry
-        content_Index[content] = deployedContents.length;
+        contentToIndex[content] = deployedContents.length;
         deployedContents.push(content);
         isDeployedContent[content] = true;
         contentToLauncher[content] = params.launcher;

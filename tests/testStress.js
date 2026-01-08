@@ -9,7 +9,7 @@ const AddressDead = "0x000000000000000000000000000000000000dEaD";
 
 const DAY = 86400;
 const WEEK = 7 * DAY;
-const EPOCH_PERIOD = 30 * DAY;
+const EPOCH_PERIOD = 1 * DAY;
 
 async function getAuctionData(content, tokenId) {
   return {
@@ -163,10 +163,11 @@ describe("STRESS TESTS - Professional Audit", function () {
       const protocolReceived = (await usdc.balanceOf(protocol.address)).sub(protocolBalBefore);
       const teamReceived = (await usdc.balanceOf(teamAddress)).sub(teamBalBefore);
 
-      expect(creatorReceived).to.equal(expectedCreatorAsPrevOwnerAndCreator);
-      expect(auctionReceived).to.equal(expectedTreasury);
-      expect(protocolReceived).to.equal(expectedProtocol);
-      expect(teamReceived).to.equal(expectedTeam);
+      // Allow small tolerance for price decay during transaction (1-day epoch = fast decay)
+      expect(creatorReceived).to.be.closeTo(expectedCreatorAsPrevOwnerAndCreator, 100);
+      expect(auctionReceived).to.be.closeTo(expectedTreasury, 100);
+      expect(protocolReceived).to.be.closeTo(expectedProtocol, 100);
+      expect(teamReceived).to.be.closeTo(expectedTeam, 100);
       console.log("All fee distributions correct: PASS");
     });
 
@@ -188,9 +189,9 @@ describe("STRESS TESTS - Professional Audit", function () {
       let block = await ethers.provider.getBlock("latest");
       await content.connect(user1).collect(user1.address, tokenId, auctionData.epochId, block.timestamp + 3600, currentPrice);
 
-      // Now price should be 2x minInitPrice = 2 USDC
+      // Now price should be ~2x minInitPrice = 2 USDC (allow tolerance for decay)
       currentPrice = await content.getPrice(tokenId);
-      expect(currentPrice).to.equal(convert("2", 6));
+      expect(currentPrice).to.be.closeTo(convert("2", 6), 100);
 
       // Collect again
       await usdc.connect(user2).approve(content.address, currentPrice);
@@ -198,9 +199,9 @@ describe("STRESS TESTS - Professional Audit", function () {
       block = await ethers.provider.getBlock("latest");
       await content.connect(user2).collect(user2.address, tokenId, auctionData.epochId, block.timestamp + 3600, currentPrice);
 
-      // Price should be ~4 USDC (allow 2 wei tolerance for decay between txs)
+      // Price should be ~4 USDC (allow tolerance for decay between txs)
       currentPrice = await content.getPrice(tokenId);
-      expect(currentPrice).to.be.closeTo(convert("4", 6), 2);
+      expect(currentPrice).to.be.closeTo(convert("4", 6), 500);
       console.log("Price doubling mechanism: PASS");
 
       // Verify fee math at 4 USDC
@@ -215,7 +216,7 @@ describe("STRESS TESTS - Professional Audit", function () {
       console.log("Fee math at 4 USDC: PASS");
     });
 
-    it("1.3 Price decay precision over 30 days", async function () {
+    it("1.3 Price decay precision over 24 hours", async function () {
       console.log("\n--- Testing price decay precision ---");
 
       await content.connect(creator1).create(creator1.address, "ipfs://decay-test");
@@ -224,28 +225,29 @@ describe("STRESS TESTS - Professional Audit", function () {
       const initPrice = await content.getPrice(tokenId);
       console.log("Initial price:", divDec6(initPrice), "USDC");
 
-      // Test at various time points
+      // Test at various time points (hours within 24-hour EPOCH_PERIOD)
+      const HOUR = 3600;
       const testPoints = [
-        { days: 1, expectedRatio: 29/30 },
-        { days: 7, expectedRatio: 23/30 },
-        { days: 15, expectedRatio: 15/30 },
-        { days: 29, expectedRatio: 1/30 },
+        { hours: 1, expectedRatio: 23/24 },
+        { hours: 6, expectedRatio: 18/24 },
+        { hours: 12, expectedRatio: 12/24 },
+        { hours: 23, expectedRatio: 1/24 },
       ];
 
       for (const point of testPoints) {
         // Reset to fresh content
-        await content.connect(creator1).create(creator1.address, `ipfs://decay-${point.days}`);
+        await content.connect(creator1).create(creator1.address, `ipfs://decay-${point.hours}h`);
         const freshTokenId = await content.nextTokenId();
 
-        await network.provider.send("evm_increaseTime", [point.days * DAY]);
+        await network.provider.send("evm_increaseTime", [point.hours * HOUR]);
         await network.provider.send("evm_mine");
 
         const decayedPrice = await content.getPrice(freshTokenId);
-        const expectedPrice = initPrice.mul(30 - point.days).div(30);
+        const expectedPrice = initPrice.mul(24 - point.hours).div(24);
 
         // Allow 1 wei tolerance for rounding
         expect(decayedPrice).to.be.closeTo(expectedPrice, 1);
-        console.log(`Day ${point.days}: ${divDec6(decayedPrice)} USDC (expected ~${divDec6(expectedPrice)})`);
+        console.log(`Hour ${point.hours}: ${divDec6(decayedPrice)} USDC (expected ~${divDec6(expectedPrice)})`);
       }
       console.log("Price decay precision: PASS");
     });
@@ -256,13 +258,13 @@ describe("STRESS TESTS - Professional Audit", function () {
       await content.connect(creator1).create(creator1.address, "ipfs://zero-price");
       const tokenId = await content.nextTokenId();
 
-      // Advance past 30 days
-      await network.provider.send("evm_increaseTime", [31 * DAY]);
+      // Advance past 1 day EPOCH_PERIOD
+      await network.provider.send("evm_increaseTime", [2 * DAY]);
       await network.provider.send("evm_mine");
 
       const price = await content.getPrice(tokenId);
       expect(price).to.equal(0);
-      console.log("Price after 31 days:", divDec6(price), "USDC");
+      console.log("Price after 2 days:", divDec6(price), "USDC");
 
       // Collect at zero price
       const auctionData = await getAuctionData(content, tokenId);
@@ -333,7 +335,8 @@ describe("STRESS TESTS - Professional Audit", function () {
 
       const user1StakeAfterCollect = await rewarder.account_Balance(user1.address);
       const stake1 = await content.id_Stake(tokenId);
-      expect(stake1).to.equal(price);
+      // Allow tolerance for price decay during transaction
+      expect(stake1).to.be.closeTo(price, 100);
       console.log("User1 stake after collect:", divDec6(stake1));
 
       // User2 re-collects (steals)
@@ -351,8 +354,8 @@ describe("STRESS TESTS - Professional Audit", function () {
 
       // User1 should have lost stake1
       expect(user1StakeAfter).to.equal(user1StakeBefore.sub(stake1));
-      // User2 should have gained new stake (allow 2 wei tolerance for price decay)
-      expect(user2StakeAfter).to.be.closeTo(user2StakeBefore.add(price), 2);
+      // User2 should have gained new stake (allow tolerance for price decay)
+      expect(user2StakeAfter).to.be.closeTo(user2StakeBefore.add(price), 500);
       console.log("Stake transfer on re-collection: PASS");
     });
 
@@ -422,9 +425,9 @@ describe("STRESS TESTS - Professional Audit", function () {
       const creator1BalAfter = await usdc.balanceOf(creator1.address);
       const netCost = creator1BalBefore.sub(creator1BalAfter);
 
-      // Net cost should be ~17% (treasury + team + protocol)
+      // Net cost should be ~17% (treasury + team + protocol), allow tolerance for decay
       const expected17Percent = price.mul(1700).div(10000);
-      expect(netCost).to.be.closeTo(expected17Percent, 1);
+      expect(netCost).to.be.closeTo(expected17Percent, 100);
       console.log("Self-collection net cost:", divDec6(netCost), "USDC (~17%)");
       console.log("Self-collection: PASS");
     });
@@ -482,9 +485,9 @@ describe("STRESS TESTS - Professional Audit", function () {
       const launcherBalAfter = await usdc.balanceOf(launcher.address);
       const launcherReceived = launcherBalAfter.sub(launcherBalBefore);
 
-      // Should receive 84%
+      // Should receive ~84% (allow tolerance for decay)
       const expected84Percent = price.mul(8400).div(10000);
-      expect(launcherReceived).to.equal(expected84Percent);
+      expect(launcherReceived).to.be.closeTo(expected84Percent, 100);
       console.log("Launcher received:", divDec6(launcherReceived), "USDC (84%)");
       console.log("Fee overlap handling: PASS");
     });
@@ -528,7 +531,8 @@ describe("STRESS TESTS - Professional Audit", function () {
       const tokenId = await content.nextTokenId();
 
       const price = await content.getPrice(tokenId);
-      const tooLowMaxPrice = price.sub(1);
+      // Use a significantly lower maxPrice (half) to ensure it's always below current price
+      const tooLowMaxPrice = price.div(2);
 
       await usdc.connect(user1).approve(content.address, price);
       const auctionData = await getAuctionData(content, tokenId);
@@ -538,8 +542,9 @@ describe("STRESS TESTS - Professional Audit", function () {
         content.connect(user1).collect(user1.address, tokenId, auctionData.epochId, block.timestamp + 3600, tooLowMaxPrice)
       ).to.be.revertedWith("Content__MaxPriceExceeded()");
 
-      // But exact price should work
-      await content.connect(user1).collect(user1.address, tokenId, auctionData.epochId, block.timestamp + 3600, price);
+      // But current price should work
+      const currentPrice = await content.getPrice(tokenId);
+      await content.connect(user1).collect(user1.address, tokenId, auctionData.epochId, block.timestamp + 3600, currentPrice);
       console.log("Slippage protection: PASS");
     });
   });
@@ -645,9 +650,9 @@ describe("STRESS TESTS - Professional Audit", function () {
       const auctionBalAfter = await usdc.balanceOf(auction.address);
       const treasuryFee = auctionBalAfter.sub(auctionBalBefore);
 
-      // Should be 15% of price
+      // Should be ~15% of price (allow tolerance for decay)
       const expected15Percent = price.mul(1500).div(10000);
-      expect(treasuryFee).to.equal(expected15Percent);
+      expect(treasuryFee).to.be.closeTo(expected15Percent, 100);
       console.log("Treasury accumulated:", divDec6(treasuryFee), "USDC");
       console.log("Treasury accumulation: PASS");
     });
@@ -699,10 +704,10 @@ describe("STRESS TESTS - Professional Audit", function () {
       }
 
       // Verify price approximately doubled each time
-      // Allow tolerance for compounding decay (each tx can have 1-2 wei decay)
+      // Allow tolerance for price decay during transactions (1-day epoch = fast decay)
       for (let i = 1; i < prices.length; i++) {
         const expected = prices[i - 1].mul(2);
-        const tolerance = Math.max(10, expected.div(100000).toNumber()); // 0.001% or 10 wei
+        const tolerance = Math.max(100, expected.div(10000).toNumber()); // 0.01% or 100 wei
         expect(prices[i]).to.be.closeTo(expected, tolerance);
       }
       console.log("Price doubling verified");

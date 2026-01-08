@@ -14,7 +14,8 @@
       "Bash(git push:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd team fee to Content: 80/15/2/2/1 fee distribution\n\nUpdate fee structure from 80/15/4/1 to 80/15/2/2/1:\n- 80% to previous owner\n- 15% to treasury\n- 2% to creator \\(was 4%\\)\n- 2% to team \\(new\\)\n- 1% to protocol\n\nChanges:\n- Content.sol: Add TEAM_FEE constant, team state variable, setTeam\\(\\)\n- ContentFactory.sol: Add _team parameter to deploy\\(\\)\n- Core.sol: Pass launcher as team address\n- IContent.sol: Add team\\(\\) and setTeam\\(\\) interface\n- IContentFactory.sol: Add _team parameter\n\nUpdate tests for new fee structure:\n- testContent.js: Update fee distribution test\n- testExtreme.js: Update fee precision test\n- testInvariants.js: Update total fees invariant\n- testBoundary.js: Add team param to Content constructor tests\n\nUpdate README with new fee documentation\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git commit:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebFetch(domain:basescan.org)"
     ]
   }
 }

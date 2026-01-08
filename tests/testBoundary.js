@@ -427,7 +427,7 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://time-almost-end");
       const tokenId = await content.nextTokenId();
 
-      const EPOCH_PERIOD = 30 * DAY;
+      const EPOCH_PERIOD = 1 * DAY;
       await ethers.provider.send("evm_increaseTime", [EPOCH_PERIOD - 1]);
       await ethers.provider.send("evm_mine");
 
@@ -440,7 +440,7 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://time-exact-end");
       const tokenId = await content.nextTokenId();
 
-      const EPOCH_PERIOD = 30 * DAY;
+      const EPOCH_PERIOD = 1 * DAY;
       await ethers.provider.send("evm_increaseTime", [EPOCH_PERIOD]);
       await ethers.provider.send("evm_mine");
 
@@ -452,7 +452,7 @@ describe("Boundary Condition Tests", function () {
       await content.connect(user1).create(user1.address, "ipfs://time-after-end");
       const tokenId = await content.nextTokenId();
 
-      const EPOCH_PERIOD = 30 * DAY;
+      const EPOCH_PERIOD = 1 * DAY;
       await ethers.provider.send("evm_increaseTime", [EPOCH_PERIOD + 1]);
       await ethers.provider.send("evm_mine");
 

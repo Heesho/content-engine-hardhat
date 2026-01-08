@@ -224,7 +224,7 @@ contract Multicall {
      */
     function getUnitState(address content, address account) external view returns (UnitState memory state) {
         // Core registry data
-        state.index = ICore(core).content_Index(content);
+        state.index = ICore(core).contentToIndex(content);
         state.unit = ICore(core).contentToUnit(content);
         state.quote = IContent(content).quote();
         state.launcher = ICore(core).contentToLauncher(content);
